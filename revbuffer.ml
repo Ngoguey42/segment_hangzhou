@@ -85,6 +85,19 @@ let reset t right_offset =
 
 let capacity { buf; _ } = Bytes.length buf
 
+let show t =
+  let right_offset = t.right_offset in
+  let left_offset = Int63.sub_distance right_offset t.occupied in
+  Fmt.epr
+    "   Buf: %d/%d\n\
+    \              left:%#14d\n\
+    \              read:%#14d\n\
+    \             right:%#14d\n\
+     %!"
+    t.occupied (capacity t) (Int63.to_int left_offset)
+    (Int63.to_int t.read_offset)
+    (Int63.to_int right_offset)
+
 let first_offset_opt t =
   if t.occupied = 0 then None
   else Some (Int63.sub_distance t.right_offset t.occupied)
@@ -105,14 +118,21 @@ let ingest t byte_count f =
     assert (freeable_bytes >= 0);
     let right_offset = t.right_offset in
     let left_offset = Int63.sub_distance right_offset t.occupied in
-    let unfreeable_bytes = Int63.distance ~hi:t.read_offset ~lo:t.read_offset in
+    let unfreeable_bytes = Int63.distance ~hi:t.read_offset ~lo:left_offset in
+    show t;
+    Fmt.epr
+      "           missing:%#14d\n\
+      \          freeable:%#14d\n\
+      \        unfreeable:%#14d\n\
+       %!"
+      missing_bytes freeable_bytes unfreeable_bytes;
     assert (freeable_bytes + unfreeable_bytes = t.occupied);
     if freeable_bytes < missing_bytes then
       Fmt.failwith
         "Failed revbuffer ingestion. \n\
-        \     buf: capa:%#11d occupied:%#11d \n\
-        \     buf: left:%#11d right:%#11d\n\
-        \     buf:                   read:%#11d\n\
+        \     buf: capa:%#14d occupied:%#14d \n\
+        \     buf: left:%#14d right:%#14d\n\
+        \     buf:                   read:%#14d\n\
         \ pushing: %d bytes, %d missing_bytes\n\
         \          %d freeable_bytes %d unfreeable_bytes" (capacity t)
         t.occupied (Int63.to_int left_offset)
@@ -139,21 +159,21 @@ let read ~mark_dirty t offset length f =
   test_invariants t;
   let right_offset = t.right_offset in
   let left_offset = Int63.sub_distance right_offset t.occupied in
+
   (* Fmt.epr "read ask      left offset: %#14d\n%!" (Int63.to_int offset); *)
   (* Fmt.epr "read ask     right offset: %#14d\n%!" (Int63.to_int (Int63.add_distance offset length)); *)
   (* Fmt.epr "     buf      left offset: %#14d\n%!" (Int63.to_int left_offset); *)
   (* Fmt.epr "     buf     right offset: %#14d\n%!" (Int63.to_int right_offset); *)
-
   let overshoot_left = Int63.(offset < left_offset) in
   let overshoot_right = Int63.(add_distance offset length > right_offset) in
   let overshoot_read = Int63.(add_distance offset length > t.read_offset) in
   if overshoot_left || overshoot_read || overshoot_read then
     Fmt.failwith
       "Illegal read attempt in revbuffer. \n\
-      \   buf: capa:%#11d occupied:%#11d \n\
-      \   buf: left:%#11d right:%#11d\n\
-      \   buf:                   read:%#11d\n\
-      \ asked: left:%#11d right:%#11d (len:%d)" (capacity t) t.occupied
+      \   buf: capa:%#14d occupied:%#14d \n\
+      \   buf: left:%#14d right:%#14d\n\
+      \   buf:                   read:%#14d\n\
+      \ asked: left:%#14d right:%#14d (len:%d)" (capacity t) t.occupied
       (Int63.to_int left_offset)
       (Int63.to_int right_offset)
       (Int63.to_int t.read_offset)

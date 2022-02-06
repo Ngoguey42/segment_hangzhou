@@ -151,6 +151,7 @@ let blindfolded_load_entry_in_buf folder left_offset =
   Revbuffer.reset folder.buf page_range_right_offset;
   IO.load_pages folder.io guessed_page_range (Revbuffer.ingest folder.buf);
   let length = decode_entry_length folder left_offset in
+  Fmt.epr "   length: %d\n%!" length;
   let actual_page_range = IO.page_range_of_offset_length left_offset length in
   if actual_page_range.last > guessed_page_range.last then (
     incr folder.stats.blindfolded_not_enough;
@@ -173,7 +174,8 @@ let ensure_entry_is_in_buf folder left_offset =
   | None ->
       (* 1 - Nothing in rev buffer. This only happens the first time we enter
          [ensure_entry_is_in_buf]. *)
-      blindfolded_load_entry_in_buf folder left_offset
+      blindfolded_load_entry_in_buf folder left_offset;
+      Revbuffer.show folder.buf
   | Some first_loaded_offset ->
       let first_loaded_page_idx = IO.page_idx_of_offset first_loaded_offset in
       if left_page_idx > first_loaded_page_idx then
@@ -183,18 +185,23 @@ let ensure_entry_is_in_buf folder left_offset =
         (* 2 - We have already loaded all the needed pages *)
         incr folder.stats.hit;
         ())
-      else if false then (
-      (* else if left_page_idx = first_loaded_page_idx - 1 then ( *)
+      else if left_page_idx = first_loaded_page_idx - 1 then (
+        (* else if false then ( *)
+        (* TODO: Investigae why case4 alone is not enough... *)
         (* 3 - The beginning of the entry is in the next page on the left. We
            don't know if it is totally contained in that left page of if it also
            spans on [first_loaded_page_idx]. It doesn't matter, we can deal with
            both cases the same way. *)
+        Fmt.epr "   mode 3 (in prev)\n%!";
         incr folder.stats.was_previous;
-        IO.load_page folder.io left_page_idx (Revbuffer.ingest folder.buf))
-      else
-        (* 3 - If the entry spans on 3 pages, we might have a suffix of it in
+        IO.load_page folder.io left_page_idx (Revbuffer.ingest folder.buf);
+        Revbuffer.show folder.buf)
+      else (
+        (* 4 - If the entry spans on 3 pages, we might have a suffix of it in
            buffer, nerver mind, let's discard everything in the buffer. *)
-        blindfolded_load_entry_in_buf folder left_offset
+        Fmt.epr "   mode 4 (far)\n%!";
+        blindfolded_load_entry_in_buf folder left_offset;
+        Revbuffer.show folder.buf)
 
 let decode_entry folder offset =
   (* Using [min_bytes_needed_to_discover_length] just so [read] doesn't
@@ -224,8 +231,10 @@ let rec traverse i folder =
     ())
   else
     let offset, _truc = Pq.pop_exn folder.pq in
-    Fmt.epr "> traverse %d: offset:%#14d (%a)\n%!" (Int63.to_int i)
-      (Int63.to_int offset) pp_stats folder.stats;
+    Fmt.epr "> traverse %d: offset:%#14d, page:%d (%a)\n%!" (Int63.to_int i)
+      (Int63.to_int offset)
+      (IO.page_idx_of_offset offset)
+      pp_stats folder.stats;
     ensure_entry_is_in_buf folder offset;
     let _entry, preds = decode_entry folder offset in
     Fmt.epr "   %d preds\n%!" (List.length preds);
