@@ -56,42 +56,7 @@
    v}
 *)
 
-module Int63 = struct
-  include Optint.Int63
-  include Infix
-
-  let ( = ) = equal
-  let ( > ) a b = compare a b > 0
-  let ( < ) a b = compare a b < 0
-  let ( >= ) a b = compare a b >= 0
-  let ( <= ) a b = compare a b <= 0
-
-  let () =
-    let ten = of_int 10 in
-    let eleven = of_int 11 in
-    assert (ten = ten);
-    assert (ten >= ten);
-    assert (ten <= ten);
-    assert (not (ten < ten));
-    assert (not (ten > ten));
-
-    assert (not (eleven = ten));
-    assert (eleven >= ten);
-    assert (not (eleven <= ten));
-    assert (not (eleven < ten));
-    assert (eleven > ten);
-
-    assert (not (ten = eleven));
-    assert (not (ten >= eleven));
-    assert (ten <= eleven);
-    assert (ten < eleven);
-    assert (not (ten > eleven));
-    Fmt.epr "👍 Passed all optint tests\n%!"
-
-  let distance ~lo ~hi = hi - lo |> to_int
-  let sub_distance x y = x - of_int y
-  let add_distance x y = x + of_int y
-end
+open Import
 
 type int63 = Int63.t [@@deriving repr]
 type stats = { mutable blit_count : int }
@@ -120,8 +85,12 @@ let reset t right_offset =
 
 let capacity { buf; _ } = Bytes.length buf
 
+let first_offset_opt t =
+  if t.occupied = 0 then None
+  else Some (Int63.sub_distance t.right_offset t.occupied)
+
 let test_invariants t =
-  assert (t.right_offset >= t.read_offset);
+  assert (Int63.(t.right_offset >= t.read_offset));
   assert (t.occupied <= capacity t);
   assert (Int63.distance ~hi:t.right_offset ~lo:t.read_offset <= t.occupied)
 
@@ -168,9 +137,9 @@ let read t offset length f =
   test_invariants t;
   let right_offset = t.right_offset in
   let left_offset = Int63.sub_distance right_offset t.occupied in
-  let overshoot_left = offset < left_offset in
-  let overshoot_right = Int63.add_distance offset length > right_offset in
-  let overshoot_read = Int63.add_distance offset length > t.read_offset in
+  let overshoot_left = Int63.(offset < left_offset) in
+  let overshoot_right = Int63.(add_distance offset length > right_offset) in
+  let overshoot_read = Int63.(add_distance offset length > t.read_offset) in
   if overshoot_left || overshoot_read || overshoot_read then
     Fmt.failwith
       "Illegal read attempt in revbuffer. \n\
@@ -216,7 +185,7 @@ let test () =
     let read_offset = to63 read_offset in
     if
       (occupied, right_offset, read_offset, blit_count)
-      <> (t.occupied, t.right_offset, t.read_offset, t.stats.blit_count)
+      <<>> (t.occupied, t.right_offset, t.read_offset, t.stats.blit_count)
     then
       Fmt.failwith
         "occupied:%d/%d, right_offset:%d/%d, read_offset:%d/%d, \
@@ -257,7 +226,7 @@ let test () =
   read_fail t (to63 995) 0;
   read t (to63 996) 4 (fun buf idx ->
       assert (idx = 6);
-      assert (String.sub buf idx 4 = "++**"));
+      assert (String.sub buf idx 4 === "++**"));
   check_ints t 4 1000 996 0;
   read_fail t (to63 996) 4;
   read t (to63 996) 0 (fun _buf idx -> assert (idx = 6));
@@ -273,7 +242,7 @@ let test () =
   (* On buffer of size 10 *)
   read t (to63 990) 6 (fun buf idx ->
       assert (idx = 0);
-      assert (String.sub buf idx 10 = ",,,,,,++**"));
+      assert (String.sub buf idx 10 === ",,,,,,++**"));
   check_ints t 10 1000 990 0;
 
   ingest t 1 (fun buf idx ->
@@ -286,7 +255,7 @@ let test () =
   (* On buffer of size 1 *)
   read t (to63 989) 1 (fun buf idx ->
       assert (idx = 9);
-      assert (String.sub buf idx 1 = "-"));
+      assert (String.sub buf idx 1 === "-"));
   check_ints t 1 990 989 1;
 
   ingest t 10 (fun buf idx ->
@@ -299,7 +268,7 @@ let test () =
   (* On buffer of size 10, again *)
   read t (to63 979) 10 (fun buf idx ->
       assert (idx = 0);
-      assert (String.sub buf idx 10 = ".........."));
+      assert (String.sub buf idx 10 === ".........."));
   check_ints t 10 989 979 2;
 
   Fmt.epr "👍 Passed all revbuffer tests\n%!"

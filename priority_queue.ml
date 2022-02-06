@@ -4,7 +4,6 @@ module Make (T : Map.OrderedType) = struct
   type 'a t = { mutable map : 'a M.t; mutable length : int }
 
   let create () = { map = M.empty; length = 0 }
-
   let top_exn t = M.max_binding t.map
 
   let pop_exn t =
@@ -16,10 +15,10 @@ module Make (T : Map.OrderedType) = struct
   let update t k f =
     let g v_opt =
       let v' = Some (f v_opt) in
-      Option.iter (fun _ -> t.length <- t.length + 1) v_opt;
+      (match v_opt with None -> t.length <- t.length + 1 | Some _ -> ());
       v'
     in
-    M.update k g t.map
+    t.map <- M.update k g t.map
 
   let is_empty t = t.length = 0
   let length t = t.length

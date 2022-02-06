@@ -1,9 +1,20 @@
+(** Hello
+
+    Throughout the code [left] and [right] are the names used to designate
+    classic ranges where [left] is the beginning of a range and [right] is
+    [left + length].
+
+    Throughout the code [first] and [last] are the names used to designate
+    non-empty ranges where [first] is the index of the first element of the
+    range and [last] is [first + length - 1].
+*)
+
 module Int63 = Optint.Int63
 module Hash = Irmin_tezos.Schema.Hash
 module Maker = Irmin_pack.Maker (Irmin_tezos.Conf)
 module Store = Maker.Make (Irmin_tezos.Schema)
 module IO = Pack_file_ios
-open Lwt.Syntax
+open Import
 
 module Key = struct
   open Irmin_pack.Pack_key
@@ -21,15 +32,17 @@ module Key = struct
     | Indexed _ -> failwith "Trying to get length from indexed key"
 end
 
-module Pq = Priority_queue.Make (struct
-  type t = Key.t
+module Pq = struct
+  include Priority_queue.Make (struct
+    type t = Key.t
 
-  let compare a b = Int63.compare (Key.offset a) (Key.offset b)
-end)
+    let compare a b = Int63.compare (Key.offset a) (Key.offset b)
+  end)
+
+  let push t k x = update t k (function None -> [ x ] | Some l -> x :: l)
+end
 
 type key = Key.t [@@deriving repr ~pp]
-type hash = Store.hash [@@deriving repr ~pp]
-type int63 = Int63.t [@@deriving repr ~pp]
 type cycle_idx = int
 type folder = { pq : cycle_idx list Pq.t; buf : Revbuffer.t; io : IO.t }
 
@@ -55,6 +68,44 @@ let hash_of_string =
 let root_hash =
   hash_of_string "CoV6QV47kn2oRnTihfjAC3dKPfrjEZjojMXVEYBLPYM7EmFkDqdS"
 
+let ensure_key_is_in_buf folder k =
+  let left_offset = Key.offset k in
+  let length = Key.length k in
+  let right_offset = Int63.add_distance left_offset length in
+  let page_range = IO.page_range_of_offset_length left_offset length in
+  match Revbuffer.first_offset_opt folder.buf with
+  | None ->
+      (* 1 - Nothing in rev buffer *)
+      IO.load_pages folder.io page_range (Revbuffer.ingest folder.buf)
+  | Some first_loaded_offset ->
+      let first_loaded_page_idx = IO.page_idx_of_offset first_loaded_offset in
+      if page_range.first > first_loaded_page_idx then
+        (* We would have already loaded pages lower than page_range *)
+        assert false
+      else if page_range.first = first_loaded_page_idx then
+        (* 2 - We have already loaded all the needed pages *)
+        ()
+      else if page_range.last >= first_loaded_page_idx then (
+        (* 3 - Some of the needed pages are already loaded (not all) *)
+        assert (page_range.first < first_loaded_page_idx);
+        let page_range = { page_range with last = first_loaded_page_idx - 1 } in
+        IO.load_pages folder.io page_range (Revbuffer.ingest folder.buf))
+      else (
+        (* 4 - None of the needed pages are loaded *)
+        Revbuffer.reset folder.buf right_offset;
+        IO.load_pages folder.io page_range (Revbuffer.ingest folder.buf))
+
+let traverse folder =
+  if Pq.is_empty folder.pq then (
+    Fmt.epr "> travese: bye bye\n%!";
+    ())
+  else
+    let k, _truc = Pq.pop_exn folder.pq in
+    ensure_key_is_in_buf folder k;
+    (* Fmt.epr "> traverse %a pages:%#d-%#d\n%!" pp_key k page_range.first *)
+      (* page_range.last; *)
+    ()
+
 let main () =
   Fmt.epr "Hello World\n%!";
   let conf = Irmin_pack.config ~fresh:false ~readonly:true path in
@@ -74,12 +125,14 @@ let main () =
   in
   Fmt.epr "root_key: %a\n%!" pp_key root_key;
   let pq = Pq.create () in
+  Pq.push pq root_key 42;
   let buf =
     Revbuffer.create ~capacity:(4096 * 100)
       ~right_offset:
         (Key.offset root_key ++ (Key.length root_key |> Int63.of_int))
   in
   let folder = { buf; io; pq } in
+  traverse folder;
   Fmt.epr "Bye World\n%!";
   Lwt.return_unit
 
