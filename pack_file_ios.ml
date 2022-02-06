@@ -138,7 +138,7 @@ let load_page t page_idx (f : int -> (bytes -> int -> unit) -> unit) =
       \ right_offset:%#14d" buffer_offset (Bytes.length buffer) bytes_read
       length (Int63.to_int left_offset)
       (Int63.to_int right_offset);
-  Fmt.epr "IO: Loaded %d bytes for page %#d \n%!" length page_idx;
+  Fmt.epr "   IO: Loaded %d bytes for page %#d \n%!" length page_idx;
   (* Fmt.epr "%S\n%!" (String.sub (Bytes.unsafe_to_string buffer) buffer_offset length); *)
   ()
 

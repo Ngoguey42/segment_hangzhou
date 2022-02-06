@@ -61,7 +61,7 @@ type folder = {
   pq : cycle_idx list Pq.t;
   buf : Revbuffer.t;
   io : IO.t;
-  decode_inode : string -> int -> Inode.Val.t;
+  decode_inode : string -> int -> Inode.Val.t * int63 list;
 }
 
 let ( ++ ) = Int63.add
@@ -104,6 +104,7 @@ let min_bytes_needed_to_discover_length =
 let max_bytes_needed_to_discover_length =
   Hash.hash_size + 1 + Varint.max_encoded_size
 
+(* TODO: Maybe more, let's compute stats on misses *)
 let expected_entry_size = 40
 
 let decode_entry_length folder offset =
@@ -130,10 +131,19 @@ let blindfolded_load_entry_in_buf folder left_offset =
   IO.load_pages folder.io guessed_page_range (Revbuffer.ingest folder.buf);
   let length = decode_entry_length folder left_offset in
   let actual_page_range = IO.page_range_of_offset_length left_offset length in
-  if actual_page_range.last > guessed_page_range.last then
-    (* TODO: implement later *)
-    assert false;
-  ()
+  if actual_page_range.last > guessed_page_range.last then (
+    (* We missed loading enough. Let's start again without reusing what was
+       just loaded. *)
+    let page_range_right_offset =
+      IO.right_offset_of_page_idx folder.io actual_page_range.last
+    in
+    Revbuffer.reset folder.buf page_range_right_offset;
+    IO.load_pages folder.io actual_page_range (Revbuffer.ingest folder.buf))
+  else if actual_page_range.last < guessed_page_range.last then
+    (* Loaded too much *)
+    ()
+  else (* Loaded just what was needed *)
+    ()
 
 let ensure_entry_is_in_buf folder left_offset =
   let left_page_idx = IO.page_idx_of_offset left_offset in
@@ -168,27 +178,32 @@ let decode_entry folder offset =
     min_bytes_needed_to_discover_length
   @@ fun buf i0 ->
   let imagic = i0 + Hash.hash_size in
-  Fmt.epr "Size of buffer                   %d\n%!" (String.length buf);
-  Fmt.epr "Supposed to have entry at bufidx %d\n%!" i0;
-  Fmt.epr "Looking for magic at bufidx      %d\n%!" imagic;
+  (* Fmt.epr "Size of buffer                   %d\n%!" (String.length buf); *)
+  (* Fmt.epr "Supposed to have entry at bufidx %d\n%!" i0; *)
+  (* Fmt.epr "Looking for magic at bufidx      %d\n%!" imagic; *)
   (* Fmt.epr "%S\n%!" (String.sub buf i0 length); *)
   let kind = Kind.of_magic_exn buf.[imagic] in
-  Fmt.epr "Kind:                            %a\n%!" pp_kind kind;
+  Fmt.epr "   %a\n%!" pp_kind kind;
   match kind with
   | Inode_v1_unstable | Inode_v1_stable | Commit_v1 | Commit_v2 ->
       Fmt.failwith "unhandled %a" pp_kind kind
-  | Contents -> `Contents
-  | Inode_v2_root | Inode_v2_nonroot -> `Inode (folder.decode_inode buf i0)
+  | Contents -> (`Contents, [])
+  | Inode_v2_root | Inode_v2_nonroot ->
+      let v_with_corrupted_keys, preds = folder.decode_inode buf i0 in
+      (`Inode v_with_corrupted_keys, preds)
 
-let traverse folder =
+let rec traverse i folder =
   if Pq.is_empty folder.pq then (
-    Fmt.epr "> travese: bye bye\n%!";
+    Fmt.epr "> traverse %d: bye bye\n%!" (Int63.to_int i);
     ())
   else
     let offset, _truc = Pq.pop_exn folder.pq in
+    Fmt.epr "> traverse %d: offset:%#14d\n%!" (Int63.to_int i) (Int63.to_int offset);
     ensure_entry_is_in_buf folder offset;
-    let _ = decode_entry folder offset in
-    ()
+    let _entry, preds = decode_entry folder offset in
+    Fmt.epr "   %d preds\n%!" (List.length preds);
+    List.iter (fun offset -> Pq.push folder.pq offset 42) preds;
+    traverse (Int63.succ i) folder
 
 let hash_to_bin_string = Repr.to_bin_string hash_t |> Repr.unstage
 
@@ -245,26 +260,33 @@ let main () =
     Revbuffer.create ~capacity:(4096 * 100) ~right_offset:root_page_right_offset
   in
   let decode_inode =
-    let dict _ =
-      (* needed because I need to know paths for stats *)
-      assert false
+    let preds = ref [] in
+    let dict =
+      let open Irmin_pack.Dict in
+      v ~fresh:false ~readonly:true path |> find
     in
-    let key_of_offset _ =
-      (* neeed, meeeeeeeeeeeeeeeeeeehh (how to get length without reads?) *)
-      assert false
+    let key_of_offset offset =
+      preds := offset :: !preds;
+      (* Generating a corrupted key *)
+      Key.v_direct ~hash:root_hash ~length:0 ~offset
     in
-    let key_of_hash _ =
-      (* let's assert false *)
+    let key_of_hash _h =
+      (* might be dangling hash, no choice but to fail anyway *)
       assert false
     in
     let to_raw = Inode.Raw.decode_bin ~dict ~key_of_offset ~key_of_hash in
     let find ~expected_depth:_ _k = None in
     let of_raw = Inode.Val.of_raw find in
-    fun string offset -> to_raw string (ref offset) |> of_raw
+    fun string offset ->
+      preds := [];
+      let v_with_corrupted_keys = to_raw string (ref offset) |> of_raw in
+      let l = !preds in
+      preds := [];
+      (v_with_corrupted_keys, l)
   in
 
   let folder = { buf; io; pq; decode_inode } in
-  traverse folder;
+  traverse Int63.zero folder;
   Fmt.epr "Bye World\n%!";
   Lwt.return_unit
 
