@@ -52,7 +52,7 @@ module Arithmetic = struct
     let phy_off = phy_of_virt virt_off in
     Int63.(div phy_off page_len |> to_int)
 
-  let start_offset_of_page_idx : int -> int63 =
+  let left_offset_of_page_idx : int -> int63 =
    fun page_idx ->
     let open Int63 in
     let phy_off = of_int page_idx * page_len in
@@ -66,13 +66,16 @@ module Arithmetic = struct
     ((of_int page_idx |> succ) * page_len) - phy_off |> to_int
 
   (** i.e. first offset of the following page, or t.right_offset *)
-  let end_offset_of_page_idx : t -> int -> int63 =
+  let right_offset_of_page_idx : t -> int -> int63 =
    fun t page_idx ->
     let virt_maxoff = t.right_offset in
     let open Int63 in
     let open Infix in
     let virt_endoff = virt_of_phy ((of_int page_idx |> succ) * page_len) in
     if virt_endoff <= virt_maxoff then virt_endoff else virt_maxoff
+
+  let right_offset_of_page_idx_from_offset : t -> int63 -> int63 =
+   fun t virt_off -> virt_off |> page_idx_of_offset |> right_offset_of_page_idx t
 end
 
 let really_read_virtual_offsets ~fd_offset =
@@ -91,10 +94,11 @@ let page_range_of_offset_length offset length =
   { first; last }
 
 let page_idx_of_offset = Arithmetic.page_idx_of_offset
+let right_offset_of_page_idx_from_offset = Arithmetic.right_offset_of_page_idx_from_offset
 
 let load_pages t { first; last } (f : int -> (bytes -> int -> unit) -> unit) =
-  let left_offset = Arithmetic.start_offset_of_page_idx first in
-  let right_offset = Arithmetic.end_offset_of_page_idx t last in
+  let left_offset = Arithmetic.left_offset_of_page_idx first in
+  let right_offset = Arithmetic.right_offset_of_page_idx t last in
   assert (Int63.(right_offset <= t.right_offset));
   let length = Int63.distance ~hi:right_offset ~lo:left_offset in
   f length @@ fun buffer buffer_offset ->
@@ -114,6 +118,8 @@ let load_pages t { first; last } (f : int -> (bytes -> int -> unit) -> unit) =
       length (Int63.to_int left_offset)
       (Int63.to_int right_offset);
   Fmt.epr "IO: Loaded %d bytes for page_range %#d-%#d \n%!" length first last;
+  Fmt.epr "%S\n%!"
+    (String.sub (Bytes.unsafe_to_string buffer) buffer_offset length);
   ()
 
 (* o *)
