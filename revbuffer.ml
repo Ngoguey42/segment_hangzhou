@@ -128,8 +128,8 @@ let ingest t byte_count f =
     test_invariants t);
   let old_occupied = t.occupied in
   let new_occupied = old_occupied + byte_count in
-  Fmt.epr "ingest: old_occupied: %d\n%!" old_occupied;
-  Fmt.epr "        new_occupied: %d\n%!" new_occupied;
+  (* Fmt.epr "ingest: old_occupied: %d\n%!" old_occupied; *)
+  (* Fmt.epr "        new_occupied: %d\n%!" new_occupied; *)
   f t.buf (capacity t - new_occupied);
   (* only mutate [t] after successful [f] call *)
   t.occupied <- new_occupied;
@@ -139,10 +139,10 @@ let read t offset length f =
   test_invariants t;
   let right_offset = t.right_offset in
   let left_offset = Int63.sub_distance right_offset t.occupied in
-  Fmt.epr "read ask      left offset: %#14d\n%!" (Int63.to_int offset);
-  Fmt.epr "read ask     right offset: %#14d\n%!" (Int63.to_int (Int63.add_distance offset length));
-  Fmt.epr "     buf      left offset: %#14d\n%!" (Int63.to_int left_offset);
-  Fmt.epr "     buf     right offset: %#14d\n%!" (Int63.to_int right_offset);
+  (* Fmt.epr "read ask      left offset: %#14d\n%!" (Int63.to_int offset); *)
+  (* Fmt.epr "read ask     right offset: %#14d\n%!" (Int63.to_int (Int63.add_distance offset length)); *)
+  (* Fmt.epr "     buf      left offset: %#14d\n%!" (Int63.to_int left_offset); *)
+  (* Fmt.epr "     buf     right offset: %#14d\n%!" (Int63.to_int right_offset); *)
 
   let overshoot_left = Int63.(offset < left_offset) in
   let overshoot_right = Int63.(add_distance offset length > right_offset) in

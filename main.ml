@@ -34,6 +34,11 @@ module Key = struct
     | Indexed _ -> failwith "Trying to get length from indexed key"
 end
 
+module Inode = struct
+  module Value = Irmin_tezos.Schema.Node (Key) (Key)
+  include Irmin_pack.Inode.Make_internal (Irmin_tezos.Conf) (Hash) (Key) (Value)
+end
+
 module Pq = struct
   include Priority_queue.Make (struct
     type t = Key.t
@@ -48,7 +53,13 @@ type kind = Kind.t [@@deriving repr ~pp]
 type hash = Store.hash [@@deriving repr ~pp]
 type key = Key.t [@@deriving repr ~pp]
 type cycle_idx = int
-type folder = { pq : cycle_idx list Pq.t; buf : Revbuffer.t; io : IO.t }
+
+type folder = {
+  pq : cycle_idx list Pq.t;
+  buf : Revbuffer.t;
+  io : IO.t;
+  decode_inode : string -> int -> Inode.Val.t;
+}
 
 let ( ++ ) = Int63.add
 let ( -- ) = Int63.sub
@@ -113,10 +124,11 @@ let decode_entry folder k =
   Fmt.epr "%S\n%!" (String.sub buf i0 length);
   let kind = Kind.of_magic_exn buf.[imagic] in
   Fmt.epr "Kind:                            %a\n%!" pp_kind kind;
-
-  ()
-(* let i = ref i in *)
-(* Kind.of_magic_exn buf.{i} () *)
+  match kind with
+  | Inode_v1_unstable | Inode_v1_stable | Commit_v1 | Commit_v2 ->
+      Fmt.failwith "unhandled %a" pp_kind kind
+  | Contents -> ()
+  | Inode_v2_root | Inode_v2_nonroot -> ()
 
 let traverse folder =
   if Pq.is_empty folder.pq then (
@@ -126,8 +138,6 @@ let traverse folder =
     let k, _truc = Pq.pop_exn folder.pq in
     ensure_key_is_in_buf folder k;
     let _ = decode_entry folder k in
-    (* Fmt.epr "> traverse %a pages:%#d-%#d\n%!" pp_key k page_range.first *)
-    (* page_range.last; *)
     ()
 
 let hash_to_bin_string = Repr.to_bin_string hash_t |> Repr.unstage
@@ -183,9 +193,27 @@ let main () =
   Pq.push pq root_key 42;
   let buf =
     Revbuffer.create ~capacity:(4096 * 100) ~right_offset:root_page_right_offset
-    (* (Int63.add_distance (Key.offset root_key) (Key.length root_key)) *)
   in
-  let folder = { buf; io; pq } in
+  let decode_inode =
+    let dict =
+      (* needed because I need to know paths for stats *)
+      assert false
+    in
+    let key_of_offset =
+      (* neeed, meeeeeeeeeeeeeeeeeeehh (how to get length without reads?) *)
+      assert false
+    in
+    let key_of_hash =
+      (* let's assert false *)
+      assert false
+    in
+    let to_raw = Inode.Raw.decode_bin ~dict ~key_of_offset ~key_of_hash in
+    let find ~expected_depth:_ _k = None in
+    let of_raw = Inode.Val.of_raw find in
+    fun string offset -> to_raw string (ref offset) |> of_raw
+  in
+
+  let folder = { buf; io; pq; decode_inode } in
   traverse folder;
   Fmt.epr "Bye World\n%!";
   Lwt.return_unit
