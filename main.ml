@@ -101,12 +101,12 @@ let main () =
   in
   Fmt.epr "root_key: %a\n%!" pp_key root_key;
   let pq = Pq.create () in
-  (* let buf =
-   *   Revbuffer.create ~capacity:(4096 * 100)
-   *     ~right_offset:
-   *       (Key.offset root_key ++ (Key.length root_key |> Int63.of_int))
-   * in
-   * let folder = { buf; io; pq } in *)
+  let buf =
+    Revbuffer.create ~capacity:(4096 * 100)
+      ~right_offset:
+        (Key.offset root_key ++ (Key.length root_key |> Int63.of_int))
+  in
+  let folder = { buf; io; pq } in
   Fmt.epr "Bye World\n%!";
   Lwt.return_unit
 
