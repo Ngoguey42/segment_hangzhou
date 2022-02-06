@@ -57,11 +57,32 @@ type hash = Store.hash [@@deriving repr ~pp]
 type key = Key.t [@@deriving repr ~pp]
 type cycle_idx = int
 
+let ref_t x = Repr.map x ref ( ! )
+
+type stats = {
+  hit : int ref;
+  blindfolded_perfect : int ref;
+  blindfolded_too_much : int ref;
+  blindfolded_not_enough : int ref;
+  was_previous : int ref;
+}
+[@@deriving repr ~pp]
+
+let fresh_stats () =
+  {
+    hit = ref 0;
+    blindfolded_perfect = ref 0;
+    blindfolded_too_much = ref 0;
+    blindfolded_not_enough = ref 0;
+    was_previous = ref 0;
+  }
+
 type folder = {
   pq : cycle_idx list Pq.t;
   buf : Revbuffer.t;
   io : IO.t;
   decode_inode : string -> int -> Inode.Val.t * int63 list;
+  stats : stats;
 }
 
 let ( ++ ) = Int63.add
@@ -132,6 +153,7 @@ let blindfolded_load_entry_in_buf folder left_offset =
   let length = decode_entry_length folder left_offset in
   let actual_page_range = IO.page_range_of_offset_length left_offset length in
   if actual_page_range.last > guessed_page_range.last then (
+    incr folder.stats.blindfolded_not_enough;
     (* We missed loading enough. Let's start again without reusing what was
        just loaded. *)
     let page_range_right_offset =
@@ -141,9 +163,9 @@ let blindfolded_load_entry_in_buf folder left_offset =
     IO.load_pages folder.io actual_page_range (Revbuffer.ingest folder.buf))
   else if actual_page_range.last < guessed_page_range.last then
     (* Loaded too much *)
-    ()
+    incr folder.stats.blindfolded_too_much
   else (* Loaded just what was needed *)
-    ()
+    incr folder.stats.blindfolded_perfect
 
 let ensure_entry_is_in_buf folder left_offset =
   let left_page_idx = IO.page_idx_of_offset left_offset in
@@ -157,15 +179,18 @@ let ensure_entry_is_in_buf folder left_offset =
       if left_page_idx > first_loaded_page_idx then
         (* We would have already loaded pages lower than page_range *)
         assert false
-      else if left_page_idx = first_loaded_page_idx then
+      else if left_page_idx = first_loaded_page_idx then (
         (* 2 - We have already loaded all the needed pages *)
-        ()
-      else if left_page_idx = first_loaded_page_idx + 1 then
+        incr folder.stats.hit;
+        ())
+      else if false then (
+      (* else if left_page_idx = first_loaded_page_idx - 1 then ( *)
         (* 3 - The beginning of the entry is in the next page on the left. We
            don't know if it is totally contained in that left page of if it also
            spans on [first_loaded_page_idx]. It doesn't matter, we can deal with
            both cases the same way. *)
-        IO.load_page folder.io left_page_idx (Revbuffer.ingest folder.buf)
+        incr folder.stats.was_previous;
+        IO.load_page folder.io left_page_idx (Revbuffer.ingest folder.buf))
       else
         (* 3 - If the entry spans on 3 pages, we might have a suffix of it in
            buffer, nerver mind, let's discard everything in the buffer. *)
@@ -193,12 +218,14 @@ let decode_entry folder offset =
       (`Inode v_with_corrupted_keys, preds)
 
 let rec traverse i folder =
+  (* if Int63.to_int i = 10 then failwith "super"; *)
   if Pq.is_empty folder.pq then (
     Fmt.epr "> traverse %d: bye bye\n%!" (Int63.to_int i);
     ())
   else
     let offset, _truc = Pq.pop_exn folder.pq in
-    Fmt.epr "> traverse %d: offset:%#14d\n%!" (Int63.to_int i) (Int63.to_int offset);
+    Fmt.epr "> traverse %d: offset:%#14d (%a)\n%!" (Int63.to_int i)
+      (Int63.to_int offset) pp_stats folder.stats;
     ensure_entry_is_in_buf folder offset;
     let _entry, preds = decode_entry folder offset in
     Fmt.epr "   %d preds\n%!" (List.length preds);
@@ -285,7 +312,8 @@ let main () =
       (v_with_corrupted_keys, l)
   in
 
-  let folder = { buf; io; pq; decode_inode } in
+  let stats = fresh_stats () in
+  let folder = { buf; io; pq; decode_inode; stats } in
   traverse Int63.zero folder;
   Fmt.epr "Bye World\n%!";
   Lwt.return_unit
