@@ -66,7 +66,7 @@ type t = {
   stats : stats;
 }
 
-let create capacity right_offset =
+let create ~capacity ~right_offset =
   {
     buf = Bytes.create capacity;
     occupied = 0;
@@ -178,7 +178,7 @@ let test () =
         read_offset t.stats.blit_count blit_count
   in
 
-  let t = create 10 1000 in
+  let t = create ~capacity:10 ~right_offset:1000 in
   assert (capacity t = 10);
 
   (* On empty buffer *)
