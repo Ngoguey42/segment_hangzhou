@@ -108,6 +108,7 @@ let root_hash =
   match loc with
   | `Home ->
       (* https://tzkt.io/1916931 *)
+      (* CYCLE & POSITION 428 (2 of 8192) *)
       "CoV6QV47kn2oRnTihfjAC3dKPfrjEZjojMXVEYBLPYM7EmFkDqdS"
   | `Com ->
       (* https://tzkt.io/2056193 *)
@@ -119,8 +120,6 @@ let hash_of_string =
   fun x -> match f x with Error (`Msg x) -> failwith x | Ok v -> v
 
 let root_hash = hash_of_string root_hash
-
-(* let is_entry_in_buffer folder offset *)
 
 module Varint = struct
   type t = int [@@deriving repr ~decode_bin]
@@ -138,7 +137,8 @@ let min_bytes_needed_to_discover_length =
 let max_bytes_needed_to_discover_length =
   Hash.hash_size + 1 + Varint.max_encoded_size
 
-(* TODO: Maybe more, let's compute stats on misses *)
+(* TODO: Maybe more, let's compute stats on misses. The goal is as many
+   too_much as not_enough. *)
 let expected_entry_size = 40
 
 let decode_entry_length folder offset =
@@ -202,10 +202,8 @@ let ensure_entry_is_in_buf folder left_offset =
         incr folder.stats.hit;
         ())
       else if left_page_idx = first_loaded_page_idx - 1 then (
-        (* else if false then ( *)
-        (* TODO: Investigae why case4 alone is not enough... *)
         (* 3 - The beginning of the entry is in the next page on the left. We
-           don't know if it is totally contained in that left page of if it also
+           don't know if it is totally contained in that left page or if it also
            spans on [first_loaded_page_idx]. It doesn't matter, we can deal with
            both cases the same way. *)
         Fmt.epr "   mode 3 (in prev)\n%!";
@@ -223,16 +221,14 @@ let decode_entry folder offset =
   (* let length = decode_entry_length folder offset in *)
 
   (* Using [min_bytes_needed_to_discover_length] just so [read] doesn't
-     crash. [read] should be improved. *)
+     crash. TODO: [read] should be improved. *)
   Revbuffer.read ~mark_dirty:true folder.buf offset
     min_bytes_needed_to_discover_length
   @@ fun buf i0 ->
   (* Fmt.epr "   ** length:%d \n%!" length; *)
   (* Fmt.epr "   ** %S\n%!" (String.sub buf i0 length); *)
   let imagic = i0 + Hash.hash_size in
-  (* Fmt.epr "Size of buffer                   %d\n%!" (String.length buf); *)
-  (* Fmt.epr "Supposed to have entry at bufidx %d\n%!" i0; *)
-  (* Fmt.epr "Looking for magic at bufidx      %d\n%!" imagic; *)
+
   let kind = Kind.of_magic_exn buf.[imagic] in
   Fmt.epr "   %a\n%!" pp_kind kind;
   match kind with
@@ -244,7 +240,6 @@ let decode_entry folder offset =
       (`Inode v_with_corrupted_keys, preds)
 
 let rec traverse i folder =
-  (* if Int63.to_int i = 10 then failwith "super"; *)
   if Pq.is_empty folder.pq then (
     Fmt.epr "> traverse %#d: bye bye\n%!" (Int63.to_int i);
     ())
@@ -363,17 +358,39 @@ let () = Lwt_main.run (main ())
       - Inserer dans [pq] la tuple [key du root node du commit du cycle], [cycle_id], ["/"]
       - Tant que pq n'est pas vide et que [max pq] est plus grand que l'offset du commit du cycle precedent
          - [key, parent_cycles, path = pop_max pq]
-         - Apprendre: length, genre (blob|inode-{root,inner}-{tree,val}), preds, step_opt
+         - Apprendre: length, genre (blob-{0-31,32-127,128,511,512+}|inode-{root,inner}-{tree,val}), (pred * step_opt) list
          - [path'] c'est le prefix de taille 2 de [path / step_opt]
          - pour chaque [parent_cycle]
            - [k = parent_cycle, current_cycle, path', genre]
-           - [results_count[k] += 1]
-           - [results_bytes[k] += length]
+           - [results_count[k] += (1, length)]
          - inserer les [preds] dans [pq] annotes avec [parent_cycles] et [path']
 
+   collected infos:
+   - "per commit tree" x "per pack-file-area" x "per path prefix" x "per genre"
+     - # of entries
+     - # of bytes used
+   - "per commit tree" x "per pack-file-area" x "per path prefix"
+     - # of bytes used by hard-coded steps
+     - # of hard-coded steps
+     - # of dict steps
+   - "per commit tree" x "per pack-file-area"
+     - # of pages touched
+     - # of chunks (contiguous groups)
+   - "per pack-file-area"
+     - # of bytes
+     - # of entries
+
    missing infos:
-   - quantity of entries/bytes "belonging" to each cycle commit
-   - quantity of entries/bytes per cycle
-   - number of contiguous chunks of entries/bytes
-   - pages
-   - blobs size *)
+   - which area references which area? (i.e. analysis of pq when changing area)
+   - traversal timings
+   - stats on size of pq
+   - distribution of situations on pull
+     - also include number of pulled pages?
+   - buffer blits
+
+   to show:
+   - evolution through cycles of
+     - things relative to the evolution of tezos
+     - things relative to the age of the pack-file
+
+*)
