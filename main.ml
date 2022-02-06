@@ -7,6 +7,9 @@
     Throughout the code [first] and [last] are the names used to designate
     non-empty ranges where [first] is the index of the first element of the
     range and [last] is [first + length - 1].
+
+    TODO: Disallow or implement schemas with no length in blobs
+
 *)
 
 module Int63 = Optint.Int63
@@ -41,9 +44,9 @@ end
 
 module Pq = struct
   include Priority_queue.Make (struct
-    type t = Key.t
+    type t = int63
 
-    let compare a b = Int63.compare (Key.offset a) (Key.offset b)
+    let compare = Int63.compare
   end)
 
   let push t k x = update t k (function None -> [ x ] | Some l -> x :: l)
@@ -83,61 +86,108 @@ let hash_of_string =
 let root_hash =
   hash_of_string "CoV6QV47kn2oRnTihfjAC3dKPfrjEZjojMXVEYBLPYM7EmFkDqdS"
 
-let ensure_key_is_in_buf folder k =
-  let left_offset = Key.offset k in
-  let length = Key.length k in
-  let right_offset = Int63.add_distance left_offset length in
-  let page_range = IO.page_range_of_offset_length left_offset length in
+(* let is_entry_in_buffer folder offset *)
+
+module Varint = struct
+  type t = int [@@deriving repr ~decode_bin]
+
+  let min_encoded_size = 1
+
+  (** LEB128 stores 7 bits per byte. An OCaml [int] has at most 63 bits.
+      [63 / 7] equals [9]. *)
+  let max_encoded_size = 9
+end
+
+let min_bytes_needed_to_discover_length =
+  Hash.hash_size + 1 + Varint.min_encoded_size
+
+let max_bytes_needed_to_discover_length =
+  Hash.hash_size + 1 + Varint.max_encoded_size
+
+let expected_entry_size = 40
+
+let decode_entry_length folder offset =
+  (* Using [min_bytes_needed_to_discover_length] just so [read] doesn't
+     crash. [read] should be improved. *)
+  Revbuffer.read ~mark_dirty:false folder.buf offset
+    min_bytes_needed_to_discover_length
+  @@ fun buf i0 ->
+  let ilength = i0 + Hash.hash_size + 1 in
+  Varint.decode_bin buf (ref ilength)
+
+let blindfolded_load_entry_in_buf folder left_offset =
+  let guessed_length =
+    max_bytes_needed_to_discover_length + expected_entry_size
+  in
+  let guessed_page_range =
+    IO.page_range_of_offset_and_guessed_length folder.io left_offset
+      guessed_length
+  in
+  let page_range_right_offset =
+    IO.right_offset_of_page_idx folder.io guessed_page_range.last
+  in
+  Revbuffer.reset folder.buf page_range_right_offset;
+  IO.load_pages folder.io guessed_page_range (Revbuffer.ingest folder.buf);
+  let length = decode_entry_length folder left_offset in
+  let actual_page_range = IO.page_range_of_offset_length left_offset length in
+  if actual_page_range.last > guessed_page_range.last then
+    (* TODO: implement later *)
+    assert false;
+  ()
+
+let ensure_entry_is_in_buf folder left_offset =
+  let left_page_idx = IO.page_idx_of_offset left_offset in
   match Revbuffer.first_offset_opt folder.buf with
   | None ->
-      (* 1 - Nothing in rev buffer *)
-      IO.load_pages folder.io page_range (Revbuffer.ingest folder.buf)
+      (* 1 - Nothing in rev buffer. This only happens the first time we enter
+         [ensure_entry_is_in_buf]. *)
+      blindfolded_load_entry_in_buf folder left_offset
   | Some first_loaded_offset ->
       let first_loaded_page_idx = IO.page_idx_of_offset first_loaded_offset in
-      if page_range.first > first_loaded_page_idx then
+      if left_page_idx > first_loaded_page_idx then
         (* We would have already loaded pages lower than page_range *)
         assert false
-      else if page_range.first = first_loaded_page_idx then
+      else if left_page_idx = first_loaded_page_idx then
         (* 2 - We have already loaded all the needed pages *)
         ()
-      else if page_range.last >= first_loaded_page_idx then (
-        (* 3 - Some of the needed pages are already loaded (not all) *)
-        assert (page_range.first < first_loaded_page_idx);
-        let page_range = { page_range with last = first_loaded_page_idx - 1 } in
-        IO.load_pages folder.io page_range (Revbuffer.ingest folder.buf))
+      else if left_page_idx = first_loaded_page_idx + 1 then
+        (* 3 - The beginning of the entry is in the next page on the left. We
+           don't know if it is totally contained in that left page of if it also
+           spans on [first_loaded_page_idx]. It doesn't matter, we can deal with
+           both cases the same way. *)
+        IO.load_page folder.io left_page_idx (Revbuffer.ingest folder.buf)
       else
-        (* 4 - None of the needed pages are loaded *)
-        let page_right_offset =
-          IO.right_offset_of_page_idx_from_offset folder.io right_offset
-        in
-        Revbuffer.reset folder.buf page_right_offset;
-        IO.load_pages folder.io page_range (Revbuffer.ingest folder.buf)
+        (* 3 - If the entry spans on 3 pages, we might have a suffix of it in
+           buffer, nerver mind, let's discard everything in the buffer. *)
+        blindfolded_load_entry_in_buf folder left_offset
 
-let decode_entry folder k =
-  let offset = Key.offset k in
-  let length = Key.length k in
-  Revbuffer.read folder.buf offset length @@ fun buf i0 ->
+let decode_entry folder offset =
+  (* Using [min_bytes_needed_to_discover_length] just so [read] doesn't
+     crash. [read] should be improved. *)
+  Revbuffer.read ~mark_dirty:true folder.buf offset
+    min_bytes_needed_to_discover_length
+  @@ fun buf i0 ->
   let imagic = i0 + Hash.hash_size in
   Fmt.epr "Size of buffer                   %d\n%!" (String.length buf);
   Fmt.epr "Supposed to have entry at bufidx %d\n%!" i0;
   Fmt.epr "Looking for magic at bufidx      %d\n%!" imagic;
-  Fmt.epr "%S\n%!" (String.sub buf i0 length);
+  (* Fmt.epr "%S\n%!" (String.sub buf i0 length); *)
   let kind = Kind.of_magic_exn buf.[imagic] in
   Fmt.epr "Kind:                            %a\n%!" pp_kind kind;
   match kind with
   | Inode_v1_unstable | Inode_v1_stable | Commit_v1 | Commit_v2 ->
       Fmt.failwith "unhandled %a" pp_kind kind
-  | Contents -> ()
-  | Inode_v2_root | Inode_v2_nonroot -> ()
+  | Contents -> `Contents
+  | Inode_v2_root | Inode_v2_nonroot -> `Inode (folder.decode_inode buf i0)
 
 let traverse folder =
   if Pq.is_empty folder.pq then (
     Fmt.epr "> travese: bye bye\n%!";
     ())
   else
-    let k, _truc = Pq.pop_exn folder.pq in
-    ensure_key_is_in_buf folder k;
-    let _ = decode_entry folder k in
+    let offset, _truc = Pq.pop_exn folder.pq in
+    ensure_entry_is_in_buf folder offset;
+    let _ = decode_entry folder offset in
     ()
 
 let hash_to_bin_string = Repr.to_bin_string hash_t |> Repr.unstage
@@ -190,20 +240,20 @@ let main () =
   Fmt.epr "\n%!";
 
   let pq = Pq.create () in
-  Pq.push pq root_key 42;
+  Pq.push pq root_left_offset 42;
   let buf =
     Revbuffer.create ~capacity:(4096 * 100) ~right_offset:root_page_right_offset
   in
   let decode_inode =
-    let dict =
+    let dict _ =
       (* needed because I need to know paths for stats *)
       assert false
     in
-    let key_of_offset =
+    let key_of_offset _ =
       (* neeed, meeeeeeeeeeeeeeeeeeehh (how to get length without reads?) *)
       assert false
     in
-    let key_of_hash =
+    let key_of_hash _ =
       (* let's assert false *)
       assert false
     in

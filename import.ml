@@ -32,10 +32,12 @@ module Int63 = struct
     assert (not (ten > eleven));
     Fmt.epr "👍 Passed all optint tests\n%!"
 
+  let min x y = if x < y then x else y
+  let max x y = if x > y then x else y
+
   let distance ~lo ~hi = hi - lo |> to_int
   let sub_distance x y = x - of_int y
   let add_distance x y = x + of_int y
-
 end
 
 let ( ++ ) = Int63.add

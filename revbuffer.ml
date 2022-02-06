@@ -135,7 +135,7 @@ let ingest t byte_count f =
   t.occupied <- new_occupied;
   test_invariants t
 
-let read t offset length f =
+let read ~mark_dirty t offset length f =
   test_invariants t;
   let right_offset = t.right_offset in
   let left_offset = Int63.sub_distance right_offset t.occupied in
@@ -162,13 +162,15 @@ let read t offset length f =
       length;
   let dist_from_left = Int63.distance ~hi:offset ~lo:left_offset in
   let idx = capacity t - t.occupied + dist_from_left in
-  f (Bytes.unsafe_to_string t.buf) idx;
+  let res = f (Bytes.unsafe_to_string t.buf) idx in
   (* only mutate [t] after successful [f] call *)
-  t.read_offset <- offset;
-  test_invariants t
+  if mark_dirty then t.read_offset <- offset;
+  test_invariants t;
+  res
 
 let test () =
   let to63 = Int63.of_int in
+  let read = read ~mark_dirty:true in
   let read_fail a b c =
     let failed =
       try
