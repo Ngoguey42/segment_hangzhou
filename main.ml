@@ -88,6 +88,9 @@ type folder = {
 let ( ++ ) = Int63.add
 let ( -- ) = Int63.sub
 
+(** maximum size of a blob *)
+let buffer_capacity = 4096 * 100
+
 let loc =
   match Unix.gethostname () with
   | "DESKTOP-S4MOBKQ" -> `Home
@@ -227,14 +230,14 @@ let decode_entry folder offset =
 let rec traverse i folder =
   (* if Int63.to_int i = 10 then failwith "super"; *)
   if Pq.is_empty folder.pq then (
-    Fmt.epr "> traverse %d: bye bye\n%!" (Int63.to_int i);
+    Fmt.epr "> traverse %#d: bye bye\n%!" (Int63.to_int i);
     ())
   else
     let offset, _truc = Pq.pop_exn folder.pq in
-    Fmt.epr "> traverse %d: offset:%#14d, page:%d (%a)\n%!" (Int63.to_int i)
-      (Int63.to_int offset)
+    Fmt.epr "> traverse %#d: offset:%#14d, page:%d, pq:%#d (%a)\n%!"
+      (Int63.to_int i) (Int63.to_int offset)
       (IO.page_idx_of_offset offset)
-      pp_stats folder.stats;
+      (Pq.length folder.pq) pp_stats folder.stats;
     ensure_entry_is_in_buf folder offset;
     let _entry, preds = decode_entry folder offset in
     Fmt.epr "   %d preds\n%!" (List.length preds);
@@ -293,7 +296,8 @@ let main () =
   let pq = Pq.create () in
   Pq.push pq root_left_offset 42;
   let buf =
-    Revbuffer.create ~capacity:(4096 * 100) ~right_offset:root_page_right_offset
+    Revbuffer.create ~capacity:buffer_capacity
+      ~right_offset:root_page_right_offset
   in
   let decode_inode =
     let preds = ref [] in
