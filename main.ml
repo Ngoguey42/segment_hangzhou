@@ -137,8 +137,8 @@ let min_bytes_needed_to_discover_length =
 let max_bytes_needed_to_discover_length =
   Hash.hash_size + 1 + Varint.max_encoded_size
 
-(* TODO: Maybe more, let's compute stats on misses. The goal is as many
-   too_much as not_enough. *)
+(* TODO: Maybe more, let's compute stats on misses. The goal is to minimise
+   [too_much + not_enough]. *)
 let expected_entry_size = 40
 
 let decode_entry_length folder offset =
@@ -262,6 +262,33 @@ let main () =
 
   let conf = Irmin_pack.config ~fresh:false ~readonly:true path in
   let* repo = Store.Repo.v conf in
+
+  let* cycles =
+    Lwt_list.fold_left_s
+      (fun acc (cycle : Cycles.t) ->
+        let h = hash_of_string cycle.context_hash in
+        let* commit_opt = Store.Commit.of_hash repo h in
+        let acc =
+          Option.fold ~none:acc
+            ~some:(fun c ->
+              let k = Store.Commit.key c in
+              let offset =
+                match Key.inspect k with
+                | Indexed _ -> assert false
+                | Direct { offset; _ } -> offset
+              in
+              Fmt.epr "pack store contains %a at offset %#14d\n%!" Cycles.pp
+                cycle (Int63.to_int offset);
+              (cycle, c) :: acc)
+            commit_opt
+        in
+        Lwt.return acc)
+      [] Cycles.l
+  in
+  Fmt.epr "pack-store contains %d cycles\n%!" (List.length cycles);
+
+  if true then failwith "super";
+
   let io = IO.v (Filename.concat path "store.pack") in
   let* commit_opt = Store.Commit.of_hash repo root_hash in
   let commit =
@@ -393,5 +420,4 @@ let () = Lwt_main.run (main ())
    - evolution through cycles of
      - things relative to the evolution of tezos
      - things relative to the age of the pack-file
-
 *)
