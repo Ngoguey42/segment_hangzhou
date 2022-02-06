@@ -94,6 +94,7 @@ let buffer_capacity = 4096 * 100
 let loc =
   match Unix.gethostname () with
   | "DESKTOP-S4MOBKQ" -> `Home
+  | "comanche" -> `Com
   | s -> Fmt.failwith "Unknown hostname %S\n%!" s
 
 let path =
@@ -103,12 +104,21 @@ let path =
   | `Com ->
       "/home/ngoguey/bench/ro/hangzu_plus2_1916931_BLu79NTncAFXHiwoHDwir4BDjh2Bdc7jgL71QYGkjv2c2oD8FwZ/store_post_node_run/context/"
 
+let root_hash =
+  match loc with
+  | `Home ->
+      (* https://tzkt.io/1916931 *)
+      "CoV6QV47kn2oRnTihfjAC3dKPfrjEZjojMXVEYBLPYM7EmFkDqdS"
+  | `Com ->
+      (* https://tzkt.io/2056193 *)
+      (* CYCLE & POSITION 445 (0 of 8192) *)
+      "CoWMUSFj7gp4LngpAhaZa62xPYZcKWMyr4Wnh14CcyyQWsPrghLx"
+
 let hash_of_string =
   let f = Repr.of_string Irmin_tezos.Schema.Hash.t in
   fun x -> match f x with Error (`Msg x) -> failwith x | Ok v -> v
 
-let root_hash =
-  hash_of_string "CoV6QV47kn2oRnTihfjAC3dKPfrjEZjojMXVEYBLPYM7EmFkDqdS"
+let root_hash = hash_of_string root_hash
 
 (* let is_entry_in_buffer folder offset *)
 
@@ -138,7 +148,10 @@ let decode_entry_length folder offset =
     min_bytes_needed_to_discover_length
   @@ fun buf i0 ->
   let ilength = i0 + Hash.hash_size + 1 in
-  Varint.decode_bin buf (ref ilength)
+  let pos_ref = ref ilength in
+  let suffix_length = Varint.decode_bin buf pos_ref in
+  let length_length = !pos_ref - ilength in
+  Hash.hash_size + 1 + length_length + suffix_length
 
 let blindfolded_load_entry_in_buf folder left_offset =
   let guessed_length =
@@ -207,16 +220,19 @@ let ensure_entry_is_in_buf folder left_offset =
         Revbuffer.show folder.buf)
 
 let decode_entry folder offset =
+  (* let length = decode_entry_length folder offset in *)
+
   (* Using [min_bytes_needed_to_discover_length] just so [read] doesn't
      crash. [read] should be improved. *)
   Revbuffer.read ~mark_dirty:true folder.buf offset
     min_bytes_needed_to_discover_length
   @@ fun buf i0 ->
+  (* Fmt.epr "   ** length:%d \n%!" length; *)
+  (* Fmt.epr "   ** %S\n%!" (String.sub buf i0 length); *)
   let imagic = i0 + Hash.hash_size in
   (* Fmt.epr "Size of buffer                   %d\n%!" (String.length buf); *)
   (* Fmt.epr "Supposed to have entry at bufidx %d\n%!" i0; *)
   (* Fmt.epr "Looking for magic at bufidx      %d\n%!" imagic; *)
-  (* Fmt.epr "%S\n%!" (String.sub buf i0 length); *)
   let kind = Kind.of_magic_exn buf.[imagic] in
   Fmt.epr "   %a\n%!" pp_kind kind;
   match kind with
@@ -286,13 +302,13 @@ let main () =
     | `Contents _ -> assert false
     | `Node n -> Store.to_backend_node n
   in
+
   Fmt.epr "\n%!";
   Fmt.epr "\n%!";
   Fmt.epr "inode:\n%!";
   Fmt.epr "%a\n%!" (Repr.pp Store.Backend.Node.Val.t) node;
   Fmt.epr "\n%!";
   Fmt.epr "\n%!";
-
   let pq = Pq.create () in
   Pq.push pq root_left_offset 42;
   let buf =
@@ -319,7 +335,10 @@ let main () =
     let of_raw = Inode.Val.of_raw find in
     fun string offset ->
       preds := [];
-      let v_with_corrupted_keys = to_raw string (ref offset) |> of_raw in
+      let off_ref = ref offset in
+      let v_with_corrupted_keys = to_raw string off_ref |> of_raw in
+      Fmt.epr "   Read from %d to %d (length: %d)\n%!" offset !off_ref
+        (!off_ref - offset);
       let l = !preds in
       preds := [];
       (v_with_corrupted_keys, l)
