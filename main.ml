@@ -382,11 +382,12 @@ let () = Lwt_main.run (main ())
 
    missing infos:
    - which area references which area? (i.e. analysis of pq when changing area)
-   - traversal timings
-   - stats on size of pq
-   - distribution of situations on pull
-     - also include number of pulled pages?
-   - buffer blits
+   - the traversal itself (c'est seulement utile si je traverse un seul commit lol)
+     - traversal timings
+     - stats on size of pq
+     - distribution of situations on pull
+       - also include number of pulled pages?
+     - buffer blits
 
    to show:
    - evolution through cycles of
