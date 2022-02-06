@@ -55,33 +55,6 @@ let hash_of_string =
 let root_hash =
   hash_of_string "CoV6QV47kn2oRnTihfjAC3dKPfrjEZjojMXVEYBLPYM7EmFkDqdS"
 
-(* Etapes:
-   - Pulls la liste de tous les cycles de tzstats.com
-   - Filtrer cette liste en fonction de l'index, recup des commit_key
-   - S'assurrer que cette liste est non vide et sans trous
-
-   - init [pq]
-   - init [results]
-   - Pour chaque cycle, du plus grand au plus petit: [current_cycle]
-      - Inserer dans [pq] la tuple [key du root node du commit du cycle], [cycle_id], ["/"]
-      - Tant que pq n'est pas vide et que [max pq] est plus grand que l'offset du commit du cycle precedent
-         - [key, parent_cycles, path = pop_max pq]
-         - Apprendre: length, genre (blob|inode-{root,inner}-{tree,val}), preds, step_opt
-         - [path'] c'est le prefix de taille 2 de [path / step_opt]
-         - pour chaque [parent_cycle]
-           - [k = parent_cycle, current_cycle, path', genre]
-           - [results_count[k] += 1]
-           - [results_bytes[k] += length]
-         - inserer les [preds] dans [pq] annotes avec [parent_cycles] et [path']
-
-   missing infos:
-   - quantity of entries/bytes "belonging" to each cycle commit
-   - quantity of entries/bytes per cycle
-   - number of contiguous chunks of entries/bytes
-   - pages
-   - blobs size
-*)
-
 let main () =
   Fmt.epr "Hello World\n%!";
   let conf = Irmin_pack.config ~fresh:false ~readonly:true path in
@@ -111,3 +84,29 @@ let main () =
   Lwt.return_unit
 
 let () = Lwt_main.run (main ())
+
+(* Etapes:
+   - Pulls la liste de tous les cycles de tzstats.com
+   - Filtrer cette liste en fonction de l'index, recup des commit_key
+   - S'assurrer que cette liste est non vide et sans trous
+
+   - init [pq]
+   - init [results]
+   - Pour chaque cycle, du plus grand au plus petit: [current_cycle]
+      - Inserer dans [pq] la tuple [key du root node du commit du cycle], [cycle_id], ["/"]
+      - Tant que pq n'est pas vide et que [max pq] est plus grand que l'offset du commit du cycle precedent
+         - [key, parent_cycles, path = pop_max pq]
+         - Apprendre: length, genre (blob|inode-{root,inner}-{tree,val}), preds, step_opt
+         - [path'] c'est le prefix de taille 2 de [path / step_opt]
+         - pour chaque [parent_cycle]
+           - [k = parent_cycle, current_cycle, path', genre]
+           - [results_count[k] += 1]
+           - [results_bytes[k] += length]
+         - inserer les [preds] dans [pq] annotes avec [parent_cycles] et [path']
+
+   missing infos:
+   - quantity of entries/bytes "belonging" to each cycle commit
+   - quantity of entries/bytes per cycle
+   - number of contiguous chunks of entries/bytes
+   - pages
+   - blobs size *)
