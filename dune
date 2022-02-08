@@ -5,6 +5,8 @@
 
 (executable
 (name main)
-(libraries unix mtime mtime.clock.os fmt irmin-tezos optint progress repr ppx_repr)
+(libraries unix mtime mtime.clock.os fmt irmin-tezos optint progress repr ppx_repr
+
+)
  (preprocess (pps ppx_repr))
 )

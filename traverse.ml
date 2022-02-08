@@ -52,6 +52,75 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
     include Irmin_pack.Inode.Make_internal (Conf) (Hash) (Key) (Value)
   end
 
+  module Timings = struct
+    type section =
+      | Read
+      | Decode_inode
+      | Decode_length
+      | Queue_push
+      | Overhead
+      | Callback
+    [@@deriving repr ~pp]
+
+    let all =
+      [ Read; Decode_inode; Decode_length; Queue_push; Overhead; Callback ]
+
+    module M = Map.Make (struct
+      type t = section
+
+      let compare = compare
+    end)
+
+    type t = {
+      mutable current_section : section;
+      mutable totals : Mtime.Span.t M.t;
+      mutable counter : Mtime_clock.counter;
+    }
+
+    let pp : t Repr.pp =
+     fun ppf t ->
+      let elapsed = Mtime_clock.count t.counter in
+      let totals =
+        M.update t.current_section
+          (function
+            | None -> assert false
+            | Some so_far -> Some (Mtime.Span.add so_far elapsed))
+          t.totals
+      in
+      let total_span =
+        M.fold (fun _ -> Mtime.Span.add) totals Mtime.Span.zero
+      in
+      let total = Mtime.Span.to_s total_span in
+      Format.fprintf ppf "{\"Total\":%a(100%%)," Mtime.Span.pp total_span;
+
+      let pp_one ppf (section, elapsed) =
+        Format.fprintf ppf "%a:%a(%.1f%%)" pp_section section Mtime.Span.pp
+          elapsed
+          (Mtime.Span.to_s elapsed /. total *. 100.)
+      in
+      Format.fprintf ppf "%a}"
+        Fmt.(list ~sep:(any ",") pp_one)
+        (totals |> M.to_seq |> List.of_seq)
+
+    let v current_section =
+      let totals =
+        List.map (fun v -> (v, Mtime.Span.zero)) all |> List.to_seq |> M.of_seq
+      in
+      let counter = Mtime_clock.counter () in
+      { totals; counter; current_section }
+
+    let switch t next_section =
+      let elapsed = Mtime_clock.count t.counter in
+      t.totals <-
+        M.update t.current_section
+          (function
+            | None -> assert false
+            | Some so_far -> Some (Mtime.Span.add so_far elapsed))
+          t.totals;
+      t.counter <- Mtime_clock.counter ();
+      t.current_section <- next_section
+  end
+
   type stats = {
     hit : int ref;
     blindfolded_perfect : int ref;
@@ -78,6 +147,17 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
     io : IO.t;
     decode_inode : string -> int -> Inode.Val.t * int63 list;
     stats : stats;
+    timings : Timings.t;
+        (* Can't put timings in stats because of repr bug on custom pp *)
+  }
+
+  (* TODO: Decode blob *)
+  (* TODO: Add commit *)
+  type entry = {
+    offset : int63;
+    length : int;
+    v : [ `Contents | `Corrupted_inode of Inode.Val.t ];
+    preds : int63 list;
   }
 
   module Varint = struct
@@ -97,6 +177,7 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
     Hash.hash_size + 1 + Varint.max_encoded_size
 
   let decode_entry_length folder offset =
+    Timings.(switch folder.timings Decode_length);
     Revbuffer.read ~mark_dirty:false folder.buf offset @@ fun buf i0 ->
     let available_bytes = String.length buf - i0 in
     assert (available_bytes >= min_bytes_needed_to_discover_length);
@@ -104,6 +185,7 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
     let pos_ref = ref ilength in
     let suffix_length = Varint.decode_bin buf pos_ref in
     let length_length = !pos_ref - ilength in
+    Timings.(switch folder.timings Overhead);
     Hash.hash_size + 1 + length_length + suffix_length
 
   let blindfolded_load_entry_in_buf folder left_offset =
@@ -118,7 +200,9 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
       IO.right_offset_of_page_idx folder.io guessed_page_range.last
     in
     Revbuffer.reset folder.buf page_range_right_offset;
+    Timings.(switch folder.timings Read);
     IO.load_pages folder.io guessed_page_range (Revbuffer.ingest folder.buf);
+    Timings.(switch folder.timings Overhead);
     let length = decode_entry_length folder left_offset in
     let actual_page_range = IO.page_range_of_offset_length left_offset length in
     if actual_page_range.last > guessed_page_range.last then (
@@ -129,7 +213,9 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
         IO.right_offset_of_page_idx folder.io actual_page_range.last
       in
       Revbuffer.reset folder.buf page_range_right_offset;
-      IO.load_pages folder.io actual_page_range (Revbuffer.ingest folder.buf))
+      Timings.(switch folder.timings Read);
+      IO.load_pages folder.io actual_page_range (Revbuffer.ingest folder.buf);
+      Timings.(switch folder.timings Overhead))
     else if actual_page_range.last < guessed_page_range.last then
       (* Loaded too much *)
       incr folder.stats.blindfolded_too_much
@@ -157,20 +243,13 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
              spans on [first_loaded_page_idx]. It doesn't matter, we can deal with
              both cases the same way. *)
           incr folder.stats.was_previous;
-          IO.load_page folder.io left_page_idx (Revbuffer.ingest folder.buf))
+          Timings.(switch folder.timings Read);
+          IO.load_page folder.io left_page_idx (Revbuffer.ingest folder.buf);
+          Timings.(switch folder.timings Overhead))
         else
           (* 4 - If the entry spans on 3 pages, we might have a suffix of it in
              buffer, nerver mind, let's discard everything in the buffer. *)
           blindfolded_load_entry_in_buf folder left_offset
-
-  (* TODO: Decode blob *)
-  (* TODO: Add commit *)
-  type entry = {
-    offset : int63;
-    length : int;
-    v : [ `Contents | `Corrupted_inode of Inode.Val.t ];
-    preds : int63 list;
-  }
 
   let decode_entry folder offset =
     let length = decode_entry_length folder offset in
@@ -184,21 +263,29 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
         Fmt.failwith "unhandled %a" pp_kind kind
     | Contents -> { offset; length; v = `Contents; preds = [] }
     | Inode_v2_root | Inode_v2_nonroot ->
+        Timings.(switch folder.timings Decode_inode);
         let v_with_corrupted_keys, preds = folder.decode_inode buf i0 in
+        Timings.(switch folder.timings Overhead);
         { offset; length; v = `Corrupted_inode v_with_corrupted_keys; preds }
 
   let rec traverse folder f acc =
     if Pq.is_empty folder.pq then (
       Fmt.epr "%a\n%!" pp_stats folder.stats;
       Revbuffer.(Fmt.epr "%a\n%!" pp_stats folder.buf.stats);
+      Fmt.epr "%a\n%!" Timings.pp folder.timings;
       acc)
     else
       let offset, _truc = Pq.pop_exn folder.pq in
       ensure_entry_is_in_buf folder offset;
       let entry = decode_entry folder offset in
+      Timings.(switch folder.timings Queue_push);
       List.iter (fun offset -> Pq.push folder.pq offset 42) entry.preds;
+      Timings.(switch folder.timings Overhead);
       folder.stats.peak_pq := max !(folder.stats.peak_pq) (Pq.length folder.pq);
-      traverse folder f (f acc entry)
+      Timings.(switch folder.timings Callback);
+      let acc = f acc entry in
+      Timings.(switch folder.timings Overhead);
+      traverse folder f acc
 
   let fold path max_offsets f acc =
     (match Conf.contents_length_header with
@@ -237,7 +324,8 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
         (v_with_corrupted_keys, l)
     in
     let stats = fresh_stats () in
+    let timings = Timings.(v Overhead) in
     stats.peak_pq := Pq.length pq;
-    let folder = { buf; io; pq; decode_inode; stats } in
+    let folder = { buf; io; pq; decode_inode; stats; timings } in
     traverse folder f acc
 end
