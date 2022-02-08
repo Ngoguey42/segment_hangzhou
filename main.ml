@@ -155,6 +155,7 @@ let () = Lwt_main.run (main ())
 
    missing infos:
    - which area references which area? (i.e. analysis of pq when changing area)
+   - intersection between trees
    - the traversal itself (c'est seulement utile si je traverse un seul commit lol)
      - traversal timings
      - stats on size of pq

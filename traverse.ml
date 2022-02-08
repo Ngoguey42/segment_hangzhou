@@ -295,6 +295,7 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
     let io = IO.v (Filename.concat path "store.pack") in
     let pq = Pq.create () in
     let buf = Revbuffer.create ~capacity:buffer_capacity in
+    (* TODO: let user pick pq value *)
     List.iter (fun o -> Pq.push pq o 42) max_offsets;
     let decode_inode =
       let preds = ref [] in
