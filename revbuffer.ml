@@ -1,60 +1,62 @@
-(* A fixed size buffer. Features:
-      - only supports insertions of chunks from right to left,
-      - only supports insertions of the form `(t * byte_count) -> (bytes * where_to_write_in_bytes)`,
-      - keeps a virtual offset,
-      - only supports reads of the form `(t * offset_to_read * bytes_count) -> (string * where_to_read_in_string)`,
-      - forces reads to occur in a strictly decreasing order,
-      - when inserting would make the buffer full, automatically discard data already read.
+(** A read buffer optimised for traversing a file by jumping from offset to
+    decreasing offset.
 
-   The typical use case is to store disk pages while traversing a file from
-   right to left, using fixed size RAM.
+    Features:
 
-   See how the data structure behaves concretely in this example:
-   {v
+    - A fixed size buffer
+    - Only supports insertions of chunks from right to left.
+    - The insertion API is
+      [(t * byte_count) -> (bytes * where_to_write_in_bytes)].
+    - Keeps a virtual offset.
+    - The read API is
+      [(t * offset_to_read) -> (string * where_to_read_in_string)].
+    - Forces reads to occur in a strictly decreasing order.
+    - When inserting would make the buffer full, automatically discard data
+      already read.
 
-   # First create an empty revbuffer
-   > create ~capacity:6 ~right_offset:100
-   buffer state " ?  ?  ?  ?  ?  ? "
-   readable       y  y  y  y  y  y
-   offsets        94 95 96 97 98 99
+    See how the data structure behaves concretely in this example:
 
-   # Push 2 bytes
-   > ingest "aa"
-   buffer state " ?  ?  ?  ?  a  a "
-   readable       y  y  y  y  y  y
-   offsets        94 95 96 97 98 99
+    {v
+    # First create an empty revbuffer
+    > create ~capacity:6 ~right_offset:100
+    buffer state " ?  ?  ?  ?  ?  ? "
+    readable       y  y  y  y  y  y
+    offsets        94 95 96 97 98 99
 
-   # Push 3 bytes
-   > ingest "bbb"
-   buffer state " ?  b  b  b  a  a "
-   readable       y  y  y  y  y  y
-   offsets        94 95 96 97 98 99
+    # Push 2 bytes
+    > ingest "aa"
+    buffer state " ?  ?  ?  ?  a  a "
+    readable       y  y  y  y  y  y
+    offsets        94 95 96 97 98 99
 
-   # Reading the last 2. It wont be possible to read these again in the future.
-   # Attempting to read the first byte would result in an exception.
-   > read ~offset:98 ~length:2
-   "aa"
-   buffer state " ?  b  b  b  a  a "
-   readable       y  y  y  y  n  n
-   offsets        94 95 96 97 98 99
+    # Push 3 bytes
+    > ingest "bbb"
+    buffer state " ?  b  b  b  a  a "
+    readable       y  y  y  y  y  y
+    offsets        94 95 96 97 98 99
 
-   # Pushing 2 bytes, which necessitates a discard of bytes read. Pushing 4
-   # bytes instead of 2 would have resulted in an exception.
-   > ingest "cc"
-   buffer state " ?  c  c  b  b  b "
-   readable       y  y  y  y  y  y
-   offsets        92 93 94 95 96 97
+    # Reading the last 2. It wont be possible to read these again in the future.
+    # Attempting to read the first byte would result in an exception.
+    > read ~offset:98
+    "aa"
+    buffer state " ?  b  b  b  a  a "
+    readable       y  y  y  y  n  n
+    offsets        94 95 96 97 98 99
 
-   # Reading 2 bytes in the middle. It wont be possible to read the last 4 in
-   # the future.
-   > read ~offset:94 ~length:2
-   "cb"
-   buffer state " ?  c  c  b  b  b "
-   readable       y  y  n  n  n  n
-   offsets        92 93 94 95 96 97
+    # Pushing 2 bytes, which necessitates a discard of bytes read. Pushing 4
+    # bytes instead of 2 would have resulted in an exception.
+    > ingest "cc"
+    buffer state " ?  c  c  b  b  b "
+    readable       y  y  y  y  y  y
+    offsets        92 93 94 95 96 97
 
-   v}
-*)
+    # Reading the last 4.
+    > read ~offset:94
+    "cb"
+    buffer state " ?  c  c  b  b  b "
+    readable       y  y  n  n  n  n
+    offsets        92 93 94 95 96 97
+    v} *)
 
 open Import
 
@@ -111,7 +113,8 @@ let test_invariants t =
   assert (t.occupied <= capacity t);
   assert (Int63.distance ~hi:t.right_offset ~lo:t.read_offset <= t.occupied)
 
-let ingest t byte_count f =
+let ingest : t -> int -> (bytes -> int -> unit) -> unit =
+ fun t byte_count f ->
   test_invariants t;
   let old_occupied = t.occupied in
   let new_occupied = old_occupied + byte_count in
@@ -123,13 +126,6 @@ let ingest t byte_count f =
     let right_offset = t.right_offset in
     let left_offset = Int63.sub_distance right_offset t.occupied in
     let unfreeable_bytes = Int63.distance ~hi:t.read_offset ~lo:left_offset in
-    (* show t;
-     * Fmt.epr
-     *   "           missing:%#14d\n\
-     *   \          freeable:%#14d\n\
-     *   \        unfreeable:%#14d\n\
-     *    %!"
-     *   missing_bytes freeable_bytes unfreeable_bytes; *)
     assert (freeable_bytes + unfreeable_bytes = t.occupied);
     if freeable_bytes < missing_bytes then
       Fmt.failwith
@@ -152,38 +148,28 @@ let ingest t byte_count f =
     test_invariants t);
   let old_occupied = t.occupied in
   let new_occupied = old_occupied + byte_count in
-  (* Fmt.epr "ingest: old_occupied: %d\n%!" old_occupied; *)
-  (* Fmt.epr "        new_occupied: %d\n%!" new_occupied; *)
   f t.buf (capacity t - new_occupied);
   (* only mutate [t] after successful [f] call *)
   t.occupied <- new_occupied;
   test_invariants t
 
-let read ~mark_dirty t offset length f =
+let read : mark_dirty:bool -> t -> int63 -> (string -> int -> 'a) -> 'a =
+ fun ~mark_dirty t offset f ->
   test_invariants t;
   let right_offset = t.right_offset in
   let left_offset = Int63.sub_distance right_offset t.occupied in
-
-  (* Fmt.epr "read ask      left offset: %#14d\n%!" (Int63.to_int offset); *)
-  (* Fmt.epr "read ask     right offset: %#14d\n%!" (Int63.to_int (Int63.add_distance offset length)); *)
-  (* Fmt.epr "     buf      left offset: %#14d\n%!" (Int63.to_int left_offset); *)
-  (* Fmt.epr "     buf     right offset: %#14d\n%!" (Int63.to_int right_offset); *)
   let overshoot_left = Int63.(offset < left_offset) in
-  let overshoot_right = Int63.(add_distance offset length > right_offset) in
-  let overshoot_read = Int63.(add_distance offset length > t.read_offset) in
-  if overshoot_left || overshoot_read || overshoot_read then
+  let overshoot_right = Int63.(offset > right_offset) in
+  if overshoot_left || overshoot_right then
     Fmt.failwith
       "Illegal read attempt in revbuffer. \n\
       \   buf: capa:%#14d occupied:%#14d \n\
       \   buf: left:%#14d right:%#14d\n\
       \   buf:                   read:%#14d\n\
-      \ asked: left:%#14d right:%#14d (len:%d)" (capacity t) t.occupied
-      (Int63.to_int left_offset)
+      \ asked: left:%#14d " (capacity t) t.occupied (Int63.to_int left_offset)
       (Int63.to_int right_offset)
       (Int63.to_int t.read_offset)
-      (Int63.to_int offset)
-      (Int63.to_int offset + length)
-      length;
+      (Int63.to_int offset);
   let dist_from_left = Int63.distance ~hi:offset ~lo:left_offset in
   let idx = capacity t - t.occupied + dist_from_left in
   let res = f (Bytes.unsafe_to_string t.buf) idx in
@@ -195,10 +181,10 @@ let read ~mark_dirty t offset length f =
 let test () =
   let to63 = Int63.of_int in
   let read = read ~mark_dirty:true in
-  let read_fail a b c =
+  let read_fail a b =
     let failed =
       try
-        read a b c (fun _buf _idx -> ());
+        read a b (fun _buf _idx -> ());
         false
       with Failure _ -> true
     in
@@ -229,19 +215,25 @@ let test () =
         (Int63.to_int t.read_offset)
         (Int63.to_int read_offset) t.stats.blit_count blit_count
   in
+  let check_read exp_idx exp_string buf idx =
+    let available_bytes = String.length buf - idx in
+    assert (exp_idx = idx);
+    assert (String.sub buf idx available_bytes === exp_string)
+  in
+
   let t = create ~capacity:10 in
   reset t (to63 1000);
   assert (capacity t = 10);
 
   (* On empty buffer *)
-  read t (to63 1000) 0 (fun _buf idx -> assert (idx = 10));
+  read t (to63 1000) (check_read 10 "");
   ingest t 0 (fun _buf idx -> assert (idx = 10));
-  read_fail t (to63 1001) 0;
-  read_fail t (to63 999) 0;
-  read_fail t (to63 1000) 1;
+  read_fail t (to63 1001);
+  read_fail t (to63 999);
   ingest_fail t 11;
   check_ints t 0 1000 1000 0;
 
+  (* ingest 4 *)
   ingest t 2 (fun buf idx ->
       assert (idx = 8);
       for i = idx to idx + 1 do
@@ -256,16 +248,12 @@ let test () =
   check_ints t 4 1000 1000 0;
 
   (* On buffer of size 4 *)
-  read_fail t (to63 1001) 0;
-  read_fail t (to63 995) 0;
-  read t (to63 996) 4 (fun buf idx ->
-      assert (idx = 6);
-      assert (String.sub buf idx 4 === "++**"));
-  check_ints t 4 1000 996 0;
-  read_fail t (to63 996) 4;
-  read t (to63 996) 0 (fun _buf idx -> assert (idx = 6));
+  read_fail t (to63 1001);
+  read_fail t (to63 995);
+  read t (to63 996) (check_read 6 "++**");
   check_ints t 4 1000 996 0;
 
+  (* ingest 6 *)
   ingest t 6 (fun buf idx ->
       assert (idx = 0);
       for i = idx to idx + 5 do
@@ -274,11 +262,10 @@ let test () =
   check_ints t 10 1000 996 0;
 
   (* On buffer of size 10 *)
-  read t (to63 990) 6 (fun buf idx ->
-      assert (idx = 0);
-      assert (String.sub buf idx 10 === ",,,,,,++**"));
+  read t (to63 990) (check_read 0 ",,,,,,++**");
   check_ints t 10 1000 990 0;
 
+  (* ingest 1 *)
   ingest t 1 (fun buf idx ->
       assert (idx = 9);
       for i = idx to idx do
@@ -287,11 +274,10 @@ let test () =
   check_ints t 1 990 990 1;
 
   (* On buffer of size 1 *)
-  read t (to63 989) 1 (fun buf idx ->
-      assert (idx = 9);
-      assert (String.sub buf idx 1 === "-"));
+  read t (to63 989) (check_read 9 "-");
   check_ints t 1 990 989 1;
 
+  (* ingest 10 *)
   ingest t 10 (fun buf idx ->
       assert (idx = 0);
       for i = idx to idx + 9 do
@@ -300,13 +286,9 @@ let test () =
   check_ints t 10 989 989 2;
 
   (* On buffer of size 10, again *)
-  read t (to63 979) 10 (fun buf idx ->
-      assert (idx = 0);
-      assert (String.sub buf idx 10 === ".........."));
+  read t (to63 979) (check_read 0 "..........");
   check_ints t 10 989 979 2;
 
   Fmt.epr "👍 Passed all revbuffer tests\n%!"
 
 let () = test ()
-
-(* *)

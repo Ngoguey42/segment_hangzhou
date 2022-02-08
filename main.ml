@@ -8,8 +8,6 @@
     non-empty ranges where [first] is the index of the first element of the
     range and [last] is [first + length - 1].
 
-    TODO: Disallow or implement schemas with no length in blobs
-
 *)
 
 module Hash = Irmin_tezos.Schema.Hash

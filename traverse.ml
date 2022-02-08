@@ -1,15 +1,15 @@
 (** Maximum number of bytes from disk to keep in memory at once.
 
-  A lower value uses less memory.
+    A lower value uses less memory.
 
-  A higher value minimises the number of [blit] in [buf].
+    A higher value minimises the number of [blit] in [buf].
 
-  In an entry ever has a size over [buffer_capacity], the program will crash. *)
+    In an entry ever has a size over [buffer_capacity], the program will crash. *)
 let buffer_capacity = 4096 * 100
 
 (** The optimal [expected_entry_size] minimises
-      [blindfolded_too_much + blindfolded_not_enough]. [50] showed good results
-      experimentally. *)
+    [blindfolded_too_much + blindfolded_not_enough]. [50] showed good results
+    experimentally. *)
 let expected_entry_size = 50
 
 open Import
@@ -76,7 +76,7 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
     let min_encoded_size = 1
 
     (** LEB128 stores 7 bits per byte. An OCaml [int] has at most 63 bits.
-      [63 / 7] equals [9]. *)
+        [63 / 7] equals [9]. *)
     let max_encoded_size = 9
   end
 
@@ -87,11 +87,9 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
     Hash.hash_size + 1 + Varint.max_encoded_size
 
   let decode_entry_length folder offset =
-    (* Using [min_bytes_needed_to_discover_length] just so [read] doesn't
-       crash. [read] should be improved. *)
-    Revbuffer.read ~mark_dirty:false folder.buf offset
-      min_bytes_needed_to_discover_length
-    @@ fun buf i0 ->
+    Revbuffer.read ~mark_dirty:false folder.buf offset @@ fun buf i0 ->
+    let available_bytes = String.length buf - i0 in
+    assert (available_bytes >= min_bytes_needed_to_discover_length);
     let ilength = i0 + Hash.hash_size + 1 in
     let pos_ref = ref ilength in
     let suffix_length = Varint.decode_bin buf pos_ref in
@@ -166,12 +164,9 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
 
   let decode_entry folder offset =
     let length = decode_entry_length folder offset in
-
-    (* Using [min_bytes_needed_to_discover_length] just so [read] doesn't
-       crash. TODO: [read] should be improved. *)
-    Revbuffer.read ~mark_dirty:true folder.buf offset
-      min_bytes_needed_to_discover_length
-    @@ fun buf i0 ->
+    Revbuffer.read ~mark_dirty:true folder.buf offset @@ fun buf i0 ->
+    let available_bytes = String.length buf - i0 in
+    assert (available_bytes >= length);
     let imagic = i0 + Hash.hash_size in
     let kind = Kind.of_magic_exn buf.[imagic] in
     match kind with
@@ -192,6 +187,10 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
       traverse folder f (f acc entry)
 
   let fold path max_offsets f acc =
+    (match Conf.contents_length_header with
+    | None ->
+        failwith "Traverse can't work with Contents not prefixed by length"
+    | Some _ -> ());
     let io = IO.v (Filename.concat path "store.pack") in
     let pq = Pq.create () in
     let buf = Revbuffer.create ~capacity:buffer_capacity in
