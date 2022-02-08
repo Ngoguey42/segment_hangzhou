@@ -1,3 +1,17 @@
+(** Maximum number of bytes from disk to keep in memory at once.
+
+  A lower value uses less memory.
+
+  A higher value minimises the number of [blit] in [buf].
+
+  In an entry ever has a size over [buffer_capacity], the program will crash. *)
+let buffer_capacity = 4096 * 100
+
+(** The optimal [expected_entry_size] minimises
+      [blindfolded_too_much + blindfolded_not_enough]. [50] showed good results
+      experimentally. *)
+let expected_entry_size = 50
+
 open Import
 module IO = Pack_file_ios
 module Kind = Irmin_pack.Pack_value.Kind
@@ -27,9 +41,6 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
     module Value = Schema.Node (Key) (Key)
     include Irmin_pack.Inode.Make_internal (Conf) (Hash) (Key) (Value)
   end
-
-  (** maximum size of a blob *)
-  let buffer_capacity = 4096 * 100
 
   let ref_t x = Repr.map x ref ( ! )
 
@@ -74,10 +85,6 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
 
   let max_bytes_needed_to_discover_length =
     Hash.hash_size + 1 + Varint.max_encoded_size
-
-  (* TODO: Maybe more, let's compute stats on misses. The goal is to minimise
-     [too_much + not_enough]. *)
-  let expected_entry_size = 40
 
   let decode_entry_length folder offset =
     (* Using [min_bytes_needed_to_discover_length] just so [read] doesn't
