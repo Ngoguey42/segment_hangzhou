@@ -138,7 +138,7 @@ let load_page t page_idx (f : int -> (bytes -> int -> unit) -> unit) =
       \ right_offset:%#14d" buffer_offset (Bytes.length buffer) bytes_read
       length (Int63.to_int left_offset)
       (Int63.to_int right_offset);
-  Fmt.epr "   IO: Loaded %d bytes for page %#d \n%!" length page_idx;
+  (* Fmt.epr "   IO: Loaded %d bytes for page %#d \n%!" length page_idx; *)
   (* Fmt.epr "%S\n%!" (String.sub (Bytes.unsafe_to_string buffer) buffer_offset length); *)
   ()
 
@@ -163,18 +163,18 @@ let load_pages t { first; last } (f : int -> (bytes -> int -> unit) -> unit) =
       \ right_offset:%#14d" buffer_offset (Bytes.length buffer) bytes_read
       length (Int63.to_int left_offset)
       (Int63.to_int right_offset);
-  Fmt.epr
-    "   IO: Loaded %d bytes for page_range %#d-%#d\n\
-    \     buffer_offset:%#14d\n\
-    \     buffer_length:%#14d\n\
-    \        bytes-read:%#14d\n\
-    \            length:%#14d\n\
-    \       left_offset:%#14d\n\
-    \      right_offset:%#14d\n\
-     %!"
-    length first last buffer_offset (Bytes.length buffer) bytes_read length
-    (Int63.to_int left_offset)
-    (Int63.to_int right_offset);
+  (* Fmt.epr
+   *   "   IO: Loaded %d bytes for page_range %#d-%#d\n\
+   *   \     buffer_offset:%#14d\n\
+   *   \     buffer_length:%#14d\n\
+   *   \        bytes-read:%#14d\n\
+   *   \            length:%#14d\n\
+   *   \       left_offset:%#14d\n\
+   *   \      right_offset:%#14d\n\
+   *    %!"
+   *   length first last buffer_offset (Bytes.length buffer) bytes_read length
+   *   (Int63.to_int left_offset)
+   *   (Int63.to_int right_offset); *)
 
   (* Fmt.epr "%S\n%!" (String.sub (Bytes.unsafe_to_string buffer) buffer_offset length); *)
   ()

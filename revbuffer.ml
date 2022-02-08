@@ -67,19 +67,22 @@ type t = {
   mutable right_offset : int63;
   mutable read_offset : int63;
   stats : stats;
+  mutable primed : bool;
 }
 
-let create ~capacity ~right_offset =
+let create ~capacity =
   {
     buf = Bytes.create capacity;
     occupied = 0;
-    right_offset;
-    read_offset = right_offset;
+    right_offset = Int63.zero;
+    read_offset = Int63.zero;
     stats = { blit_count = 0 };
+    primed = false;
   }
 
 let reset t right_offset =
   t.occupied <- 0;
+  t.primed <- true;
   t.right_offset <- right_offset;
   t.read_offset <- right_offset
 
@@ -103,6 +106,7 @@ let first_offset_opt t =
   else Some (Int63.sub_distance t.right_offset t.occupied)
 
 let test_invariants t =
+  assert (t.primed);
   assert (Int63.(t.right_offset >= t.read_offset));
   assert (t.occupied <= capacity t);
   assert (Int63.distance ~hi:t.right_offset ~lo:t.read_offset <= t.occupied)
@@ -119,13 +123,13 @@ let ingest t byte_count f =
     let right_offset = t.right_offset in
     let left_offset = Int63.sub_distance right_offset t.occupied in
     let unfreeable_bytes = Int63.distance ~hi:t.read_offset ~lo:left_offset in
-    show t;
-    Fmt.epr
-      "           missing:%#14d\n\
-      \          freeable:%#14d\n\
-      \        unfreeable:%#14d\n\
-       %!"
-      missing_bytes freeable_bytes unfreeable_bytes;
+    (* show t;
+     * Fmt.epr
+     *   "           missing:%#14d\n\
+     *   \          freeable:%#14d\n\
+     *   \        unfreeable:%#14d\n\
+     *    %!"
+     *   missing_bytes freeable_bytes unfreeable_bytes; *)
     assert (freeable_bytes + unfreeable_bytes = t.occupied);
     if freeable_bytes < missing_bytes then
       Fmt.failwith
@@ -225,7 +229,8 @@ let test () =
         (Int63.to_int t.read_offset)
         (Int63.to_int read_offset) t.stats.blit_count blit_count
   in
-  let t = create ~capacity:10 ~right_offset:(to63 1000) in
+  let t = create ~capacity:10 in
+  reset t (to63 1000);
   assert (capacity t = 10);
 
   (* On empty buffer *)
