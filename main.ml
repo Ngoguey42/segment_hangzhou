@@ -1,14 +1,4 @@
-(** Hello
-
-    Throughout the code [left] and [right] are the names used to designate
-    classic ranges where [left] is the beginning of a range and [right] is
-    [left + length].
-
-    Throughout the code [first] and [last] are the names used to designate
-    non-empty ranges where [first] is the index of the first element of the
-    range and [last] is [first + length - 1].
-
-*)
+(** Hello *)
 
 module Hash = Irmin_tezos.Schema.Hash
 module Maker = Irmin_pack.Maker (Irmin_tezos.Conf)

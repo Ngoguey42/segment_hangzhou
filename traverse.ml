@@ -1,10 +1,20 @@
+(** Traverse *)
+
 (** Maximum number of bytes from disk to keep in memory at once.
 
     A lower value uses less memory.
 
     A higher value minimises the number of [blit] in [buf].
 
-    In an entry ever has a size over [buffer_capacity], the program will crash. *)
+    In an entry ever has a size over [buffer_capacity], the program will crash.
+
+    Throughout the code [left] and [right] are the names used to designate
+    classic ranges where [left] is the beginning of a range and [right] is
+    [left + length].
+
+    Throughout the code [first] and [last] are the names used to designate
+    non-empty ranges where [first] is the index of the first element of the
+    range and [last] is [first + length - 1]. *)
 let buffer_capacity = 4096 * 100
 
 (** The optimal [expected_entry_size] minimises
@@ -42,14 +52,13 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
     include Irmin_pack.Inode.Make_internal (Conf) (Hash) (Key) (Value)
   end
 
-  let ref_t x = Repr.map x ref ( ! )
-
   type stats = {
     hit : int ref;
     blindfolded_perfect : int ref;
     blindfolded_too_much : int ref;
     blindfolded_not_enough : int ref;
     was_previous : int ref;
+    peak_pq : int ref;
   }
   [@@deriving repr ~pp]
 
@@ -60,9 +69,10 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
       blindfolded_too_much = ref 0;
       blindfolded_not_enough = ref 0;
       was_previous = ref 0;
+      peak_pq = ref 0;
     }
 
-  type foldecr = {
+  type folder = {
     pq : int list Pq.t;
     buf : Revbuffer.t;
     io : IO.t;
@@ -178,12 +188,16 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
         { offset; length; v = `Corrupted_inode v_with_corrupted_keys; preds }
 
   let rec traverse folder f acc =
-    if Pq.is_empty folder.pq then acc
+    if Pq.is_empty folder.pq then (
+      Fmt.epr "%a\n%!" pp_stats folder.stats;
+      Revbuffer.(Fmt.epr "%a\n%!" pp_stats folder.buf.stats);
+      acc)
     else
       let offset, _truc = Pq.pop_exn folder.pq in
       ensure_entry_is_in_buf folder offset;
       let entry = decode_entry folder offset in
       List.iter (fun offset -> Pq.push folder.pq offset 42) entry.preds;
+      folder.stats.peak_pq := max !(folder.stats.peak_pq) (Pq.length folder.pq);
       traverse folder f (f acc entry)
 
   let fold path max_offsets f acc =
@@ -223,6 +237,7 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
         (v_with_corrupted_keys, l)
     in
     let stats = fresh_stats () in
+    stats.peak_pq := Pq.length pq;
     let folder = { buf; io; pq; decode_inode; stats } in
     traverse folder f acc
 end

@@ -1,3 +1,5 @@
+(** Quick and dirty priority queue with a poor complexity *)
+
 module Make (T : Map.OrderedType) = struct
   module M = Map.Make (T)
 

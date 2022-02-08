@@ -61,7 +61,7 @@
 open Import
 
 type int63 = Int63.t [@@deriving repr]
-type stats = { mutable blit_count : int }
+type stats = { blit_count : int ref } [@@deriving repr ~pp]
 
 type t = {
   buf : bytes;
@@ -78,7 +78,7 @@ let create ~capacity =
     occupied = 0;
     right_offset = Int63.zero;
     read_offset = Int63.zero;
-    stats = { blit_count = 0 };
+    stats = { blit_count = ref 0 };
     primed = false;
   }
 
@@ -142,7 +142,7 @@ let ingest : t -> int -> (bytes -> int -> unit) -> unit =
     let old_left_idx = capacity t - t.occupied in
     let new_left_idx = capacity t - unfreeable_bytes in
     Bytes.blit t.buf old_left_idx t.buf new_left_idx unfreeable_bytes;
-    t.stats.blit_count <- t.stats.blit_count + 1;
+    incr t.stats.blit_count;
     t.right_offset <- t.read_offset;
     t.occupied <- unfreeable_bytes;
     test_invariants t);
@@ -204,7 +204,7 @@ let test () =
     let read_offset = to63 read_offset in
     if
       (occupied, right_offset, read_offset, blit_count)
-      <<>> (t.occupied, t.right_offset, t.read_offset, t.stats.blit_count)
+      <<>> (t.occupied, t.right_offset, t.read_offset, !(t.stats.blit_count))
     then
       Fmt.failwith
         "occupied:%d/%d, right_offset:%d/%d, read_offset:%d/%d, \
@@ -213,7 +213,7 @@ let test () =
         (Int63.to_int t.right_offset)
         (Int63.to_int right_offset)
         (Int63.to_int t.read_offset)
-        (Int63.to_int read_offset) t.stats.blit_count blit_count
+        (Int63.to_int read_offset) !(t.stats.blit_count) blit_count
   in
   let check_read exp_idx exp_string buf idx =
     let available_bytes = String.length buf - idx in
