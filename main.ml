@@ -396,14 +396,19 @@ let () = Lwt_main.run (main ())
    - "per commit tree" x "per pack-file-area" x "per path prefix" x "per genre"
      - # of entries
      - # of bytes used
-   - "per commit tree" x "per pack-file-area" x "per path prefix"
+   - "per commit tree" x "per pack-file-area" x "per path prefix" x ()
      - # of bytes used by hard-coded steps
      - # of hard-coded steps
      - # of dict steps
-   - "per commit tree" x "per pack-file-area"
+   - "per commit tree" x "per pack-file-area" x ()                x ()
      - # of pages touched
      - # of chunks (contiguous groups)
-   - "per pack-file-area"
+   - () x                "per pack-file-area" x "per path prefix" x "per genre + commit"
+     - # of total entries (needed for leftover calculation)
+     - # of total bytes used (needed for leftover calculation)
+
+   not needed?
+   - () x                "per pack-file-area" x ()                x ()
      - # of bytes
      - # of entries
 
@@ -417,7 +422,15 @@ let () = Lwt_main.run (main ())
      - buffer blits
 
    to show:
-   - evolution through cycles of
-     - things relative to the evolution of tezos
-     - things relative to the age of the pack-file
+   - (?) averaged on all ref commits
+     - at which cycle-distance are all genre (entry weighted / bytes weighted)
+     - at which cycle-distance are all paths (entry weighted / bytes weighted)
+   - (camembert) averaged on all ref commits + (curves) evolution for all ref commits
+     - at which cycle-distance are the entries (entry weighted / bytes weighted)
+     - number in each genre  (entry weighted / bytes weighted)
+     - number in each directory (entry weighted / bytes weighted)
+     - which path grows the most (entry weighted / bytes weighted)
+
+
+
 *)
