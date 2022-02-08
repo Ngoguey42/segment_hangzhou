@@ -106,7 +106,7 @@ let first_offset_opt t =
   else Some (Int63.sub_distance t.right_offset t.occupied)
 
 let test_invariants t =
-  assert (t.primed);
+  assert t.primed;
   assert (Int63.(t.right_offset >= t.read_offset));
   assert (t.occupied <= capacity t);
   assert (Int63.distance ~hi:t.right_offset ~lo:t.read_offset <= t.occupied)

@@ -68,6 +68,13 @@ let hash_of_string =
 let root_hash = hash_of_string root_hash
 let hash_to_bin_string = Repr.to_bin_string hash_t |> Repr.unstage
 
+type acc = { i : int }
+
+let accumulate acc _entry =
+  if acc.i mod 500_000 = 0 then Fmt.epr "accumulate: %#d\n%!" acc.i;
+
+  { acc with i = acc.i + 1 }
+
 let main () =
   Fmt.epr "Hello World\n%!";
 
@@ -111,7 +118,11 @@ let main () =
   in
   let root_left_offset = Key.offset root_key in
 
-  Traverse.fold path [ root_left_offset ] (fun () -> ()) ();
+  let acc0 = { i = 0 } in
+
+  let acc = Traverse.fold path [ root_left_offset ] accumulate acc0 in
+  ignore acc;
+
   Fmt.epr "Bye World\n%!";
   Lwt.return_unit
 

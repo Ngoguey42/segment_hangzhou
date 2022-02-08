@@ -105,7 +105,6 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
     Revbuffer.reset folder.buf page_range_right_offset;
     IO.load_pages folder.io guessed_page_range (Revbuffer.ingest folder.buf);
     let length = decode_entry_length folder left_offset in
-    (* Fmt.epr "   length: %d\n%!" length; *)
     let actual_page_range = IO.page_range_of_offset_length left_offset length in
     if actual_page_range.last > guessed_page_range.last then (
       incr folder.stats.blindfolded_not_enough;
@@ -128,68 +127,62 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
     | None ->
         (* 1 - Nothing in rev buffer. This only happens the first time we enter
            [ensure_entry_is_in_buf]. *)
-        blindfolded_load_entry_in_buf folder left_offset;
-        (* Revbuffer.show folder.buf *)
+        blindfolded_load_entry_in_buf folder left_offset
     | Some first_loaded_offset ->
         let first_loaded_page_idx = IO.page_idx_of_offset first_loaded_offset in
         if left_page_idx > first_loaded_page_idx then
           (* We would have already loaded pages lower than page_range *)
           assert false
-        else if left_page_idx = first_loaded_page_idx then (
+        else if left_page_idx = first_loaded_page_idx then
           (* 2 - We have already loaded all the needed pages *)
-          incr folder.stats.hit;
-          ())
+          incr folder.stats.hit
         else if left_page_idx = first_loaded_page_idx - 1 then (
           (* 3 - The beginning of the entry is in the next page on the left. We
              don't know if it is totally contained in that left page or if it also
              spans on [first_loaded_page_idx]. It doesn't matter, we can deal with
              both cases the same way. *)
-          (* Fmt.epr "   mode 3 (in prev)\n%!"; *)
           incr folder.stats.was_previous;
-          IO.load_page folder.io left_page_idx (Revbuffer.ingest folder.buf);
-          (* Revbuffer.show folder.buf *)
-        )
-        else (
+          IO.load_page folder.io left_page_idx (Revbuffer.ingest folder.buf))
+        else
           (* 4 - If the entry spans on 3 pages, we might have a suffix of it in
              buffer, nerver mind, let's discard everything in the buffer. *)
-          (* Fmt.epr "   mode 4 (far)\n%!"; *)
-          blindfolded_load_entry_in_buf folder left_offset;
-          (* Revbuffer.show folder.buf *)
-        )
+          blindfolded_load_entry_in_buf folder left_offset
+
+  (* TODO: Decode blob *)
+  (* TODO: Add commit *)
+  type entry = {
+    offset : int63;
+    length : int;
+    v : [ `Contents | `Corrupted_inode of Inode.Val.t ];
+    preds : int63 list;
+  }
+
   let decode_entry folder offset =
-    (* let length = decode_entry_length folder offset in *)
+    let length = decode_entry_length folder offset in
 
     (* Using [min_bytes_needed_to_discover_length] just so [read] doesn't
        crash. TODO: [read] should be improved. *)
     Revbuffer.read ~mark_dirty:true folder.buf offset
       min_bytes_needed_to_discover_length
     @@ fun buf i0 ->
-    (* Fmt.epr "   ** length:%d \n%!" length; *)
-    (* Fmt.epr "   ** %S\n%!" (String.sub buf i0 length); *)
     let imagic = i0 + Hash.hash_size in
-
     let kind = Kind.of_magic_exn buf.[imagic] in
-    (* Fmt.epr "   %a\n%!" pp_kind kind; *)
     match kind with
     | Inode_v1_unstable | Inode_v1_stable | Commit_v1 | Commit_v2 ->
         Fmt.failwith "unhandled %a" pp_kind kind
-    | Contents -> (`Contents, [])
+    | Contents -> { offset; length; v = `Contents; preds = [] }
     | Inode_v2_root | Inode_v2_nonroot ->
         let v_with_corrupted_keys, preds = folder.decode_inode buf i0 in
-        (`Inode v_with_corrupted_keys, preds)
+        { offset; length; v = `Corrupted_inode v_with_corrupted_keys; preds }
 
   let rec traverse folder f acc =
-    (* Fmt.epr "> traverse %#d: offset:%#14d, page:%d, pq:%#d (%a)\n%!"
-     *   (Int63.to_int i) (Int63.to_int offset)
-     *   (IO.page_idx_of_offset offset)
-     *   (Pq.length folder.pq) pp_stats folder.stats; *)
     if Pq.is_empty folder.pq then acc
     else
       let offset, _truc = Pq.pop_exn folder.pq in
       ensure_entry_is_in_buf folder offset;
-      let _entry, preds = decode_entry folder offset in
-      List.iter (fun offset -> Pq.push folder.pq offset 42) preds;
-      traverse folder f (f acc)
+      let entry = decode_entry folder offset in
+      List.iter (fun offset -> Pq.push folder.pq offset 42) entry.preds;
+      traverse folder f (f acc entry)
 
   let fold path max_offsets f acc =
     let io = IO.v (Filename.concat path "store.pack") in
@@ -219,8 +212,6 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
         preds := [];
         let off_ref = ref offset in
         let v_with_corrupted_keys = to_raw string off_ref |> of_raw in
-        (* Fmt.epr "   Read from %d to %d (length: %d)\n%!" offset !off_ref
-         *   (!off_ref - offset); *)
         let l = !preds in
         preds := [];
         (v_with_corrupted_keys, l)
@@ -228,6 +219,4 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
     let stats = fresh_stats () in
     let folder = { buf; io; pq; decode_inode; stats } in
     traverse folder f acc
-
-  (* lol *)
 end
