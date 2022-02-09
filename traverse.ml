@@ -47,6 +47,8 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
   module Inode = struct
     module Value = Schema.Node (Key) (Key)
     include Irmin_pack.Inode.Make_internal (Conf) (Hash) (Key) (Value)
+
+    type compress = Compress.t [@@deriving repr ~decode_bin]
   end
 
   module Timings = struct
@@ -142,7 +144,6 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
     pq : 'pl Pq.t;
     buf : Revbuffer.t;
     io : IO.t;
-    decode_inode : string -> int -> Inode.Val.t * int63 list;
     merge_payloads : int63 -> older:'pl -> newer:'pl -> 'pl;
     stats : stats;
     timings : Timings.t;
@@ -154,8 +155,7 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
   type 'pl entry = {
     offset : int63;
     length : int;
-    v : [ `Contents | `Corrupted_inode of Inode.Val.t ];
-    preds : int63 list;
+    v : [ `Contents | `Inode of Inode.compress ];
     payload : 'pl;
   }
 
@@ -250,8 +250,7 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
              buffer, nerver mind, let's discard everything in the buffer. *)
           blindfolded_load_entry_in_buf folder left_offset
 
-  let decode_entry folder offset payload =
-    let length = decode_entry_length folder offset in
+  let decode_entry folder offset length =
     Revbuffer.read ~mark_dirty:true folder.buf offset @@ fun buf i0 ->
     let available_bytes = String.length buf - i0 in
     assert (available_bytes >= length);
@@ -260,22 +259,12 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
     match kind with
     | Inode_v1_unstable | Inode_v1_stable | Commit_v1 | Commit_v2 ->
         Fmt.failwith "unhandled %a" pp_kind kind
-    | Contents -> { offset; length; v = `Contents; preds = []; payload }
+    | Contents -> `Contents
     | Inode_v2_root | Inode_v2_nonroot ->
         Timings.(switch folder.timings Decode_inode);
-        let v_with_corrupted_keys, preds = folder.decode_inode buf i0 in
-        (* TODO: Make [v] created by a standlone function
-           TODO: Put Compress.t in `Inode
-           TODO: Manually extract predecessors from Compress.t
-        *)
+        let v = Inode.decode_bin_compress buf (ref i0) in
         Timings.(switch folder.timings Overhead);
-        {
-          offset;
-          length;
-          v = `Corrupted_inode v_with_corrupted_keys;
-          preds;
-          payload;
-        }
+        `Inode v
 
   let push_entry pq merge_payloads off newer =
     Pq.update pq off (function
@@ -291,7 +280,9 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
     else
       let offset, payload = Pq.pop_exn folder.pq in
       ensure_entry_is_in_buf folder offset;
-      let entry = decode_entry folder offset payload in
+      let length = decode_entry_length folder offset in
+      let v = decode_entry folder offset length in
+      let entry = { offset; length; v; payload } in
       Timings.(switch folder.timings Callback);
       let acc, predecessors = f acc entry in
       Timings.(switch folder.timings Overhead);
@@ -323,38 +314,9 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
     let buf = Revbuffer.create ~capacity:buffer_capacity in
     let push_entry = push_entry pq merge_payloads in
     List.iter (fun (off, payload) -> push_entry off payload) max_offsets;
-    let decode_inode =
-      let preds = ref [] in
-      let dict =
-        let open Irmin_pack.Dict in
-        v ~fresh:false ~readonly:true path |> find
-      in
-      let key_of_offset offset =
-        preds := offset :: !preds;
-        (* Generating a corrupted key *)
-        (* TODO: Put fake hash *)
-        Irmin_pack.Pack_key.v_direct ~hash:(Obj.magic ()) ~length:0 ~offset
-      in
-      let key_of_hash _h =
-        (* might be dangling hash, no choice but to fail anyway *)
-        assert false
-      in
-      let to_raw = Inode.Raw.decode_bin ~dict ~key_of_offset ~key_of_hash in
-      let find ~expected_depth:_ _k = None in
-      let of_raw = Inode.Val.of_raw find in
-      fun string offset ->
-        preds := [];
-        let off_ref = ref offset in
-        let v_with_corrupted_keys = to_raw string off_ref |> of_raw in
-        let l = !preds in
-        preds := [];
-        (v_with_corrupted_keys, l)
-    in
     let stats = fresh_stats () in
     let timings = Timings.(v Overhead) in
     stats.peak_pq := Pq.length pq;
-    let folder =
-      { buf; io; pq; decode_inode; stats; timings; merge_payloads }
-    in
+    let folder = { buf; io; pq; stats; timings; merge_payloads } in
     traverse folder f acc
 end

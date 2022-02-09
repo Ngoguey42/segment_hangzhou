@@ -1,4 +1,7 @@
-(** Hello *)
+(** Hello
+
+    Requires https://github.com/Ngoguey42/irmin/pull/new/expose-compress
+*)
 
 module Hash = Irmin_tezos.Schema.Hash
 module Maker = Irmin_pack.Maker (Irmin_tezos.Conf)
@@ -59,9 +62,35 @@ let hash_to_bin_string = Repr.to_bin_string hash_t |> Repr.unstage
 type acc = { i : int }
 type p = Payload
 
+let offset_of_address =
+  let open Traverse.Inode.Compress in
+  function
+  | Offset x -> x
+  | Hash _ -> failwith "traverse doesn't handle inode children by hash"
+
+let preds_of_inode v =
+  let open Traverse.Inode.Compress in
+  let v =
+    match v.tv with
+    | V0_stable v | V0_unstable v | V1_root { v; _ } | V1_nonroot { v; _ } -> v
+  in
+  match v with
+  | Values l ->
+      List.map
+        (function
+          | Contents (_, addr, _) -> offset_of_address addr
+          | Node (_, addr) -> offset_of_address addr)
+        l
+  | Tree { entries; _ } ->
+      List.map (fun (e : ptr) -> offset_of_address e.hash) entries
+
 let accumulate acc (entry : _ Traverse.entry) =
   if acc.i mod 3_000_000 = 0 then Fmt.epr "accumulate: %#d\n%!" acc.i;
-  let preds = List.map (fun off -> (off, Payload)) entry.preds in
+
+  let preds =
+    match entry.v with `Contents -> [] | `Inode t -> preds_of_inode t
+  in
+  let preds = List.map (fun off -> (off, Payload)) preds in
   ({ acc with i = acc.i + 1 }, preds)
 
 let main () =
@@ -126,18 +155,7 @@ let () = Lwt_main.run (main ())
    - Filtrer cette liste en fonction de l'index, recup des commit_key
    - S'assurrer que cette liste est non vide et sans trous
 
-   - init [pq]
-   - init [results]
-   - Pour chaque cycle, du plus grand au plus petit: [current_cycle]
-      - Inserer dans [pq] la tuple [key du root node du commit du cycle], [cycle_id], ["/"]
-      - Tant que pq n'est pas vide et que [max pq] est plus grand que l'offset du commit du cycle precedent
-         - [key, parent_cycles, path = pop_max pq]
-         - Apprendre: length, genre (blob-{0-31,32-127,128,511,512+}|inode-{root,inner}-{tree,val}), (pred * step_opt) list
-         - [path'] c'est le prefix de taille 2 de [path / step_opt]
-         - pour chaque [parent_cycle]
-           - [k = parent_cycle, current_cycle, path', genre]
-           - [results_count[k] += (1, length)]
-         - inserer les [preds] dans [pq] annotes avec [parent_cycles] et [path']
+   - genre: (blob-{0-31,32-127,128,511,512+}|inode-{root,inner}-{tree,val})
 
    collected infos:
    - "per commit tree" x "per pack-file-area" x "per path prefix" x "per genre"
