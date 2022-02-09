@@ -57,11 +57,12 @@ let root_hash = hash_of_string root_hash
 let hash_to_bin_string = Repr.to_bin_string hash_t |> Repr.unstage
 
 type acc = { i : int }
+type p = Payload
 
-let accumulate acc _entry =
+let accumulate acc (entry : _ Traverse.entry) =
   if acc.i mod 3_000_000 = 0 then Fmt.epr "accumulate: %#d\n%!" acc.i;
-
-  { acc with i = acc.i + 1 }
+  let preds = List.map (fun off -> (off, Payload)) entry.preds in
+  ({ acc with i = acc.i + 1 }, preds)
 
 let main () =
   Fmt.epr "Hello World\n%!";
@@ -107,7 +108,12 @@ let main () =
   let root_left_offset = Key.offset root_key in
 
   let acc0 = { i = 0 } in
-  let acc = Traverse.fold path [ root_left_offset ] accumulate acc0 in
+  let acc =
+    Traverse.fold path
+      [ (root_left_offset, Payload) ]
+      (fun _off ~older:Payload ~newer:Payload -> Payload)
+      accumulate acc0
+  in
   ignore acc;
 
   Fmt.epr "Bye World\n%!";

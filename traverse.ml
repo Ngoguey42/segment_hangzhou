@@ -28,15 +28,11 @@ module Kind = Irmin_pack.Pack_value.Kind
 
 type kind = Kind.t [@@deriving repr ~pp]
 
-module Pq = struct
-  include Priority_queue.Make (struct
-    type t = int63
+module Pq = Priority_queue.Make (struct
+  type t = int63
 
-    let compare = Int63.compare
-  end)
-
-  let push t k x = update t k (function None -> [ x ] | Some l -> x :: l)
-end
+  let compare = Int63.compare
+end)
 
 module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
   module Maker = Irmin_pack.Maker (Conf)
@@ -46,6 +42,7 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
 
   type hash = Store.hash [@@deriving repr ~pp]
   type key = Key.t [@@deriving repr ~pp]
+  type 'payload predecessors = (int63 * 'payload) list
 
   module Inode = struct
     module Value = Schema.Node (Key) (Key)
@@ -141,11 +138,12 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
       peak_pq = ref 0;
     }
 
-  type folder = {
-    pq : int list Pq.t;
+  type 'pl folder = {
+    pq : 'pl Pq.t;
     buf : Revbuffer.t;
     io : IO.t;
     decode_inode : string -> int -> Inode.Val.t * int63 list;
+    merge_payloads : int63 -> older:'pl -> newer:'pl -> 'pl;
     stats : stats;
     timings : Timings.t;
         (* Can't put timings in stats because of repr bug on custom pp *)
@@ -153,11 +151,12 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
 
   (* TODO: Decode blob *)
   (* TODO: Add commit *)
-  type entry = {
+  type 'pl entry = {
     offset : int63;
     length : int;
     v : [ `Contents | `Corrupted_inode of Inode.Val.t ];
     preds : int63 list;
+    payload : 'pl;
   }
 
   module Varint = struct
@@ -251,7 +250,7 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
              buffer, nerver mind, let's discard everything in the buffer. *)
           blindfolded_load_entry_in_buf folder left_offset
 
-  let decode_entry folder offset =
+  let decode_entry folder offset payload =
     let length = decode_entry_length folder offset in
     Revbuffer.read ~mark_dirty:true folder.buf offset @@ fun buf i0 ->
     let available_bytes = String.length buf - i0 in
@@ -261,12 +260,27 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
     match kind with
     | Inode_v1_unstable | Inode_v1_stable | Commit_v1 | Commit_v2 ->
         Fmt.failwith "unhandled %a" pp_kind kind
-    | Contents -> { offset; length; v = `Contents; preds = [] }
+    | Contents -> { offset; length; v = `Contents; preds = []; payload }
     | Inode_v2_root | Inode_v2_nonroot ->
         Timings.(switch folder.timings Decode_inode);
         let v_with_corrupted_keys, preds = folder.decode_inode buf i0 in
+        (* TODO: Make [v] created by a standlone function
+           TODO: Put Compress.t in `Inode
+           TODO: Manually extract predecessors from Compress.t
+        *)
         Timings.(switch folder.timings Overhead);
-        { offset; length; v = `Corrupted_inode v_with_corrupted_keys; preds }
+        {
+          offset;
+          length;
+          v = `Corrupted_inode v_with_corrupted_keys;
+          preds;
+          payload;
+        }
+
+  let push_entry pq merge_payloads off newer =
+    Pq.update pq off (function
+      | None -> newer
+      | Some older -> merge_payloads off ~older ~newer)
 
   let rec traverse folder f acc =
     if Pq.is_empty folder.pq then (
@@ -275,19 +289,31 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
       Fmt.epr "%a\n%!" Timings.pp folder.timings;
       acc)
     else
-      let offset, _truc = Pq.pop_exn folder.pq in
+      let offset, payload = Pq.pop_exn folder.pq in
       ensure_entry_is_in_buf folder offset;
-      let entry = decode_entry folder offset in
+      let entry = decode_entry folder offset payload in
+      Timings.(switch folder.timings Callback);
+      let acc, predecessors = f acc entry in
+      Timings.(switch folder.timings Overhead);
       Timings.(switch folder.timings Queue_push);
-      List.iter (fun offset -> Pq.push folder.pq offset 42) entry.preds;
+      List.iter
+        (fun (off, payload) ->
+          if Int63.(off >= offset) then
+            failwith "Precedessors should be to the left of their parent";
+          push_entry folder.pq folder.merge_payloads off payload)
+        predecessors;
       Timings.(switch folder.timings Overhead);
       folder.stats.peak_pq := max !(folder.stats.peak_pq) (Pq.length folder.pq);
-      Timings.(switch folder.timings Callback);
-      let acc = f acc entry in
-      Timings.(switch folder.timings Overhead);
       traverse folder f acc
 
-  let fold path max_offsets f acc =
+  let fold :
+      string ->
+      'pl predecessors ->
+      (int63 -> older:'pl -> newer:'pl -> 'pl) ->
+      ('a -> 'pl entry -> 'a * 'pl predecessors) ->
+      'a ->
+      'a =
+   fun path max_offsets merge_payloads f acc ->
     (match Conf.contents_length_header with
     | None ->
         failwith "Traverse can't work with Contents not prefixed by length"
@@ -295,8 +321,8 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
     let io = IO.v (Filename.concat path "store.pack") in
     let pq = Pq.create () in
     let buf = Revbuffer.create ~capacity:buffer_capacity in
-    (* TODO: let user pick pq value *)
-    List.iter (fun o -> Pq.push pq o 42) max_offsets;
+    let push_entry = push_entry pq merge_payloads in
+    List.iter (fun (off, payload) -> push_entry off payload) max_offsets;
     let decode_inode =
       let preds = ref [] in
       let dict =
@@ -327,6 +353,8 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
     let stats = fresh_stats () in
     let timings = Timings.(v Overhead) in
     stats.peak_pq := Pq.length pq;
-    let folder = { buf; io; pq; decode_inode; stats; timings } in
+    let folder =
+      { buf; io; pq; decode_inode; stats; timings; merge_payloads }
+    in
     traverse folder f acc
 end
