@@ -1,7 +1,6 @@
 (** Hello
 
-    Requires https://github.com/Ngoguey42/irmin/pull/new/expose-compress
-*)
+    Requires https://github.com/Ngoguey42/irmin/pull/new/expose-compress *)
 
 module Hash = Irmin_tezos.Schema.Hash
 module Maker = Irmin_pack.Maker (Irmin_tezos.Conf)
@@ -150,11 +149,7 @@ let main () =
 
 let () = Lwt_main.run (main ())
 
-(* Etapes:
-   - Pulls la liste de tous les cycles de tzstats.com
-   - Filtrer cette liste en fonction de l'index, recup des commit_key
-   - S'assurrer que cette liste est non vide et sans trous
-
+(*
    - genre: (blob-{0-31,32-127,128,511,512+}|inode-{root,inner}-{tree,val})
 
    collected infos:

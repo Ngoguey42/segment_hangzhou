@@ -56,13 +56,13 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
       | Read
       | Decode_inode
       | Decode_length
-      | Queue_push
+      | Priority_queue
       | Overhead
       | Callback
     [@@deriving repr ~pp]
 
     let all =
-      [ Read; Decode_inode; Decode_length; Queue_push; Overhead; Callback ]
+      [ Read; Decode_inode; Decode_length; Priority_queue; Overhead; Callback ]
 
     module M = Map.Make (struct
       type t = section
@@ -109,6 +109,7 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
       { totals; counter; current_section }
 
     let switch t next_section =
+      (* TODO: Use [with_section] *)
       let elapsed = Mtime_clock.count t.counter in
       t.totals <-
         M.update t.current_section
@@ -222,6 +223,9 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
       incr folder.stats.blindfolded_perfect
 
   let ensure_entry_is_in_buf folder left_offset =
+    (* TODO: Some way of notifying when contiguous blocks are going to be
+       flushed. We only learn that an entry is the leftmost one of a chunk
+       at the next iteration loop. *)
     let left_page_idx = IO.page_idx_of_offset left_offset in
     match Revbuffer.first_offset_opt folder.buf with
     | None ->
@@ -277,8 +281,10 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
       Revbuffer.(Fmt.epr "%a\n%!" pp_stats folder.buf.stats);
       Fmt.epr "%a\n%!" Timings.pp folder.timings;
       acc)
-    else
+    else (
+      Timings.(switch folder.timings Priority_queue);
       let offset, payload = Pq.pop_exn folder.pq in
+      Timings.(switch folder.timings Overhead);
       ensure_entry_is_in_buf folder offset;
       let length = decode_entry_length folder offset in
       let v = decode_entry folder offset length in
@@ -286,7 +292,7 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
       Timings.(switch folder.timings Callback);
       let acc, predecessors = f acc entry in
       Timings.(switch folder.timings Overhead);
-      Timings.(switch folder.timings Queue_push);
+      Timings.(switch folder.timings Priority_queue);
       List.iter
         (fun (off, payload) ->
           if Int63.(off >= offset) then
@@ -295,7 +301,7 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
         predecessors;
       Timings.(switch folder.timings Overhead);
       folder.stats.peak_pq := max !(folder.stats.peak_pq) (Pq.length folder.pq);
-      traverse folder f acc
+      traverse folder f acc)
 
   let fold :
       string ->
