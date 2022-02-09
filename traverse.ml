@@ -121,6 +121,67 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
       t.current_section <- next_section
   end
 
+  (** [Chunk_watcher] calls [on_chunk] for all the consecutive read blocks
+      encountered during the the traversal. *)
+  module Chunk_watcher = struct
+    type t = {
+      mutable is_inside_chunk : bool;
+      mutable left_offset : int63;
+      mutable right_offset : int63;
+      on_chunk : approximate:bool -> string -> i:int -> length:int -> offset:int63 -> unit;
+    }
+
+    let v on_chunk =
+      {
+        is_inside_chunk = false;
+        left_offset = Int63.zero;
+        right_offset = Int63.zero;
+        on_chunk;
+      }
+
+    let notify_chunk ~approximate t (buf_cursor : Revbuffer.cursor) =
+      assert (Int63.(buf_cursor.offset <= t.left_offset));
+      let buf = buf_cursor.buf in
+      let i =
+        buf_cursor.i + Int63.distance ~lo:buf_cursor.offset ~hi:t.left_offset
+      in
+      let length = Int63.distance ~lo:t.left_offset ~hi:t.right_offset in
+      let offset = t.left_offset in
+      (* TODO: [on_chunk] changes acc *)
+      (* TODO: watch timings on callback *)
+      t.on_chunk ~approximate buf ~i ~offset ~length
+
+    (** The function gets called for every single entry part of the traversal *)
+    let on_entry t (buf_cursor : Revbuffer.cursor) entry_length =
+      let entry_right_offset =
+        Int63.add_distance buf_cursor.offset entry_length
+      in
+      if not t.is_inside_chunk then (
+        (* 1 - Beginning of chunk *)
+        t.is_inside_chunk <- true;
+        t.left_offset <- buf_cursor.offset;
+        t.right_offset <- entry_right_offset)
+      else if Int63.(entry_right_offset > t.left_offset) then assert false
+      else if Int63.(entry_right_offset = t.left_offset) then
+        (* 2 - Continuity of chunk *)
+        t.left_offset <- buf_cursor.offset
+      else (
+        (* 3 - End of chunk (exact) *)
+        notify_chunk ~approximate:false t buf_cursor;
+
+        (* 4 - Beginning of chunk *)
+        t.left_offset <- buf_cursor.offset;
+        t.right_offset <- entry_right_offset)
+
+    (** This function gets called by [Revbuffer] every time it is about to erase
+        old entries in its internal buffer on [reset], [ingest] or [clear]. *)
+    let on_buffer_erase ~auto t (buf_cursor : Revbuffer.cursor) =
+      if t.is_inside_chunk then (
+        (* 4 - End of chunk (approximate) *)
+        notify_chunk ~approximate:auto t buf_cursor;
+        t.is_inside_chunk <- false)
+  end
+
   type stats = {
     hit : int ref;
     blindfolded_perfect : int ref;
@@ -128,6 +189,7 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
     blindfolded_not_enough : int ref;
     was_previous : int ref;
     peak_pq : int ref;
+    buffer_shrinks : int ref;
   }
   [@@deriving repr ~pp]
 
@@ -139,6 +201,7 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
       blindfolded_not_enough = ref 0;
       was_previous = ref 0;
       peak_pq = ref 0;
+      buffer_shrinks = ref 0;
     }
 
   type 'pl folder = {
@@ -149,6 +212,7 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
     stats : stats;
     timings : Timings.t;
         (* Can't put timings in stats because of repr bug on custom pp *)
+    chunk_watcher : Chunk_watcher.t;
   }
 
   (* TODO: Decode blob *)
@@ -256,6 +320,9 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
 
   let decode_entry folder offset length =
     Revbuffer.read ~mark_dirty:true folder.buf offset @@ fun buf i0 ->
+    Chunk_watcher.on_entry folder.chunk_watcher
+      Revbuffer.{ buf; i = i0; offset }
+      length;
     let available_bytes = String.length buf - i0 in
     assert (available_bytes >= length);
     let imagic = i0 + Hash.hash_size in
@@ -277,6 +344,8 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
 
   let rec traverse folder f acc =
     if Pq.is_empty folder.pq then (
+      (* [clear] the revbuff so that [on_erase] gets calls one last time *)
+      Revbuffer.clear folder.buf;
       Fmt.epr "%a\n%!" pp_stats folder.stats;
       Revbuffer.(Fmt.epr "%a\n%!" pp_stats folder.buf.stats);
       Fmt.epr "%a\n%!" Timings.pp folder.timings;
@@ -306,23 +375,37 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
   let fold :
       string ->
       'pl predecessors ->
+      (approximate:bool -> string -> i:int -> length:int -> offset:int63 -> unit) ->
       (int63 -> older:'pl -> newer:'pl -> 'pl) ->
       ('a -> 'pl entry -> 'a * 'pl predecessors) ->
       'a ->
       'a =
-   fun path max_offsets merge_payloads f acc ->
+   fun path max_offsets on_chunk merge_payloads f acc ->
     (match Conf.contents_length_header with
     | None ->
         failwith "Traverse can't work with Contents not prefixed by length"
     | Some _ -> ());
     let io = IO.v (Filename.concat path "store.pack") in
-    let pq = Pq.create () in
-    let buf = Revbuffer.create ~capacity:buffer_capacity in
-    let push_entry = push_entry pq merge_payloads in
-    List.iter (fun (off, payload) -> push_entry off payload) max_offsets;
     let stats = fresh_stats () in
     let timings = Timings.(v Overhead) in
+    let chunk_watcher = Chunk_watcher.v on_chunk in
+
+    let pq = Pq.create () in
+    let push_entry = push_entry pq merge_payloads in
+    List.iter (fun (off, payload) -> push_entry off payload) max_offsets;
     stats.peak_pq := Pq.length pq;
-    let folder = { buf; io; pq; stats; timings; merge_payloads } in
+
+    let folder_ref = ref None in
+    let on_erase ~auto buf_cursor =
+      incr stats.buffer_shrinks;
+      let folder = Option.get !folder_ref in
+      Chunk_watcher.on_buffer_erase ~auto folder.chunk_watcher buf_cursor
+    in
+    let buf = Revbuffer.create ~capacity:buffer_capacity ~on_erase in
+
+    let folder =
+      { buf; io; pq; stats; timings; merge_payloads; chunk_watcher }
+    in
+    folder_ref := Some folder;
     traverse folder f acc
 end

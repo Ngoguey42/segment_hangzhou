@@ -62,6 +62,7 @@ open Import
 
 type int63 = Int63.t [@@deriving repr]
 type stats = { blit_count : int ref } [@@deriving repr ~pp]
+type cursor = { buf : string; i : int; offset : int63 }
 
 type t = {
   buf : bytes;
@@ -70,9 +71,10 @@ type t = {
   mutable read_offset : int63;
   stats : stats;
   mutable primed : bool;
+  on_erase : auto:bool -> cursor -> unit;
 }
 
-let create ~capacity =
+let create ~on_erase ~capacity =
   {
     buf = Bytes.create capacity;
     occupied = 0;
@@ -80,15 +82,32 @@ let create ~capacity =
     read_offset = Int63.zero;
     stats = { blit_count = ref 0 };
     primed = false;
+    on_erase;
   }
 
+let capacity { buf; _ } = Bytes.length buf
+
+let clear t =
+  (if t.occupied > 0 then
+   let buf = Bytes.unsafe_to_string t.buf in
+   let i = capacity t - t.occupied in
+   let offset = Int63.sub_distance t.right_offset t.occupied in
+   t.on_erase ~auto:false { buf; i; offset });
+  t.occupied <- 0;
+  t.right_offset <- Int63.zero;
+  t.read_offset <- Int63.zero;
+  t.primed <- false
+
 let reset t right_offset =
+  (if t.occupied > 0 then
+   let buf = Bytes.unsafe_to_string t.buf in
+   let i = capacity t - t.occupied in
+   let offset = Int63.sub_distance t.right_offset t.occupied in
+   t.on_erase ~auto:false { buf; i; offset });
   t.occupied <- 0;
   t.primed <- true;
   t.right_offset <- right_offset;
   t.read_offset <- right_offset
-
-let capacity { buf; _ } = Bytes.length buf
 
 let show t =
   let right_offset = t.right_offset in
@@ -141,6 +160,12 @@ let ingest : t -> int -> (bytes -> int -> unit) -> unit =
         byte_count missing_bytes freeable_bytes unfreeable_bytes;
     let old_left_idx = capacity t - t.occupied in
     let new_left_idx = capacity t - unfreeable_bytes in
+    let () =
+      let buf = Bytes.unsafe_to_string t.buf in
+      let i = old_left_idx in
+      let offset = left_offset in
+      t.on_erase ~auto:true { buf; i; offset }
+    in
     Bytes.blit t.buf old_left_idx t.buf new_left_idx unfreeable_bytes;
     incr t.stats.blit_count;
     t.right_offset <- t.read_offset;
@@ -221,7 +246,7 @@ let test () =
     assert (String.sub buf idx available_bytes === exp_string)
   in
 
-  let t = create ~capacity:10 in
+  let t = create ~capacity:10 ~on_erase:(fun ~auto:_ _ -> ()) in
   reset t (to63 1000);
   assert (capacity t = 10);
 

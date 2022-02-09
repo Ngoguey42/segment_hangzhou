@@ -58,7 +58,7 @@ let hash_of_string =
 let root_hash = hash_of_string root_hash
 let hash_to_bin_string = Repr.to_bin_string hash_t |> Repr.unstage
 
-type acc = { i : int }
+type acc = { i : int; tot_length : int; u : unit }
 type p = Payload
 
 let offset_of_address =
@@ -90,7 +90,24 @@ let accumulate acc (entry : _ Traverse.entry) =
     match entry.v with `Contents -> [] | `Inode t -> preds_of_inode t
   in
   let preds = List.map (fun off -> (off, Payload)) preds in
-  ({ acc with i = acc.i + 1 }, preds)
+  ({ acc with i = acc.i + 1; tot_length = acc.tot_length + entry.length }, preds)
+
+let tot_length = ref 0
+let min_left_offset = ref Int63.max_int
+let max_right_offset = ref Int63.minus_one
+let tot_chunk = ref 0
+let tot_approximate_chunk = ref 0
+
+let on_chunk ~approximate buf ~i ~length ~offset =
+  let left_offset = offset in
+  let right_offset = Int63.add_distance offset length in
+  tot_length := !tot_length + length;
+  min_left_offset := Int63.min left_offset !min_left_offset;
+  max_right_offset := Int63.max right_offset !max_right_offset;
+  incr tot_chunk;
+  if approximate then incr tot_approximate_chunk;
+  ignore (buf, i, length, offset);
+  ()
 
 let main () =
   Fmt.epr "Hello World\n%!";
@@ -135,14 +152,22 @@ let main () =
   in
   let root_left_offset = Key.offset root_key in
 
-  let acc0 = { i = 0 } in
+  let acc0 = { i = 0; u = (); tot_length = 0 } in
   let acc =
     Traverse.fold path
       [ (root_left_offset, Payload) ]
+      on_chunk
       (fun _off ~older:Payload ~newer:Payload -> Payload)
       accumulate acc0
   in
   ignore acc;
+  Fmt.epr "       acc.tot_length: %#14d\n%!" acc.tot_length;
+
+  Fmt.epr "           tot_length: %#14d\n%!" !tot_length;
+  Fmt.epr "      min_left_offset: %#14d\n%!" (Int63.to_int !min_left_offset);
+  Fmt.epr "     max_right_offset: %#14d\n%!" (Int63.to_int !max_right_offset);
+  Fmt.epr "            tot_chunk: %#14d\n%!" !tot_chunk;
+  Fmt.epr "tot_approximate_chunk: %#14d\n%!" !tot_approximate_chunk;
 
   Fmt.epr "Bye World\n%!";
   Lwt.return_unit
