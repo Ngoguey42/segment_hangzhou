@@ -57,12 +57,22 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
       | Decode_inode
       | Decode_length
       | Priority_queue
+      | Blit
       | Overhead
       | Callback
     [@@deriving repr ~pp]
 
     let all =
-      [ Read; Decode_inode; Decode_length; Priority_queue; Overhead; Callback ]
+      [
+        Read;
+        Decode_inode;
+        Decode_length;
+        Priority_queue;
+        Blit;
+        Overhead;
+        Callback;
+      ]
+    (* TODO: Limit read to really_read *)
 
     module M = Map.Make (struct
       type t = section
@@ -109,7 +119,6 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
       { totals; counter; current_section }
 
     let switch t next_section =
-      (* TODO: Use [with_section] *)
       let elapsed = Mtime_clock.count t.counter in
       t.totals <-
         M.update t.current_section
@@ -119,6 +128,13 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
           t.totals;
       t.counter <- Mtime_clock.counter ();
       t.current_section <- next_section
+
+    let with_section t section f =
+      let parent_section = t.current_section in
+      switch t section;
+      let res = f () in
+      switch t parent_section;
+      res
   end
 
   type stats = {
@@ -178,7 +194,7 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
     Hash.hash_size + 1 + Varint.max_encoded_size
 
   let decode_entry_length folder offset =
-    Timings.(switch folder.timings Decode_length);
+    Timings.(with_section folder.timings Decode_length) @@ fun () ->
     Revbuffer.read folder.buf offset @@ fun buf i0 ->
     let available_bytes = String.length buf - i0 in
     assert (available_bytes >= min_bytes_needed_to_discover_length);
@@ -186,7 +202,6 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
     let pos_ref = ref ilength in
     let suffix_length = Varint.decode_bin buf pos_ref in
     let length_length = !pos_ref - ilength in
-    Timings.(switch folder.timings Overhead);
     (Hash.hash_size + 1 + length_length + suffix_length, 0)
 
   let blindfolded_load_entry_in_buf folder left_offset =
@@ -201,9 +216,10 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
       IO.right_offset_of_page_idx folder.io guessed_page_range.last
     in
     Revbuffer.reset folder.buf page_range_right_offset;
-    Timings.(switch folder.timings Read);
-    IO.load_pages folder.io guessed_page_range (Revbuffer.ingest folder.buf);
-    Timings.(switch folder.timings Overhead);
+    let () =
+      Timings.(with_section folder.timings Read) @@ fun () ->
+      IO.load_pages folder.io guessed_page_range (Revbuffer.ingest folder.buf)
+    in
     let length = decode_entry_length folder left_offset in
     let actual_page_range = IO.page_range_of_offset_length left_offset length in
     if actual_page_range.last > guessed_page_range.last then (
@@ -214,9 +230,8 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
         IO.right_offset_of_page_idx folder.io actual_page_range.last
       in
       Revbuffer.reset folder.buf page_range_right_offset;
-      Timings.(switch folder.timings Read);
-      IO.load_pages folder.io actual_page_range (Revbuffer.ingest folder.buf);
-      Timings.(switch folder.timings Overhead))
+      Timings.(with_section folder.timings Read) @@ fun () ->
+      IO.load_pages folder.io actual_page_range (Revbuffer.ingest folder.buf))
     else if actual_page_range.last < guessed_page_range.last then
       (* Loaded too much *)
       incr folder.stats.blindfolded_too_much
@@ -247,9 +262,8 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
              spans on [first_loaded_page_idx]. It doesn't matter, we can deal with
              both cases the same way. *)
           incr folder.stats.was_previous;
-          Timings.(switch folder.timings Read);
-          IO.load_page folder.io left_page_idx (Revbuffer.ingest folder.buf);
-          Timings.(switch folder.timings Overhead))
+          Timings.(with_section folder.timings Read) @@ fun () ->
+          IO.load_page folder.io left_page_idx (Revbuffer.ingest folder.buf))
         else
           (* 4 - If the entry spans on 3 pages, we might have a suffix of it in
              buffer, nerver mind, let's discard everything in the buffer. *)
@@ -266,9 +280,10 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
         Fmt.failwith "unhandled %a" pp_kind kind
     | Contents -> (`Contents, length)
     | Inode_v2_root | Inode_v2_nonroot ->
-        Timings.(switch folder.timings Decode_inode);
-        let v = Inode.decode_bin_compress buf (ref i0) in
-        Timings.(switch folder.timings Overhead);
+        let v =
+          Timings.(with_section folder.timings Decode_inode) @@ fun () ->
+          Inode.decode_bin_compress buf (ref i0)
+        in
         (`Inode v, length)
 
   let push_entry pq merge_payloads off newer =
@@ -283,28 +298,31 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
       Fmt.epr "%a\n%!" pp_stats folder.stats;
       Revbuffer.(Fmt.epr "%a\n%!" pp_stats folder.buf.stats);
       Fmt.epr "%a\n%!" Timings.pp folder.timings)
-    else (
-      Timings.(switch folder.timings Priority_queue);
-      let offset, payload = Pq.pop_exn folder.pq in
-      Timings.(switch folder.timings Overhead);
+    else
+      let offset, payload =
+        Timings.(with_section folder.timings Priority_queue) @@ fun () ->
+        Pq.pop_exn folder.pq
+      in
       ensure_entry_is_in_buf folder offset;
       let length = decode_entry_length folder offset in
       let v = decode_entry folder offset length in
       let entry = { offset; length; v; payload } in
-      Timings.(switch folder.timings Callback);
-      let acc, predecessors = f !(folder.acc) entry in
+      let acc, predecessors =
+        Timings.(with_section folder.timings Callback) @@ fun () ->
+        f !(folder.acc) entry
+      in
       folder.acc := acc;
-      Timings.(switch folder.timings Overhead);
-      Timings.(switch folder.timings Priority_queue);
-      List.iter
-        (fun (off, payload) ->
-          if Int63.(off >= offset) then
-            failwith "Precedessors should be to the left of their parent";
-          push_entry folder.pq folder.merge_payloads off payload)
-        predecessors;
-      Timings.(switch folder.timings Overhead);
+      let () =
+        Timings.(with_section folder.timings Priority_queue) @@ fun () ->
+        List.iter
+          (fun (off, payload) ->
+            if Int63.(off >= offset) then
+              failwith "Precedessors should be to the left of their parent";
+            push_entry folder.pq folder.merge_payloads off payload)
+          predecessors
+      in
       folder.stats.peak_pq := max !(folder.stats.peak_pq) (Pq.length folder.pq);
-      traverse folder f)
+      traverse folder f
 
   let fold :
       string ->
