@@ -77,9 +77,10 @@ type t = {
   mutable current_chunk : current_chunk option;
   stats : stats;
   on_chunk : chunk -> unit;
+  timings : Timings.t;
 }
 
-let create ~on_chunk ~capacity ~right_offset =
+let create ~on_chunk ~capacity ~right_offset ~timings =
   {
     buf = Bytes.create capacity;
     occupied = 0;
@@ -87,6 +88,7 @@ let create ~on_chunk ~capacity ~right_offset =
     current_chunk = None;
     stats = { blit_count = ref 0; blit_bytes = ref 0 };
     on_chunk;
+    timings;
   }
 
 let capacity { buf; _ } = Bytes.length buf
@@ -144,6 +146,7 @@ let test_invariants t =
 let perform_blit t unfreeable_bytes new_right_offset =
   let old_left_idx = capacity t - t.occupied in
   let new_left_idx = capacity t - unfreeable_bytes in
+  Timings.(with_section t.timings Blit) @@ fun () ->
   Bytes.blit t.buf old_left_idx t.buf new_left_idx unfreeable_bytes;
   incr t.stats.blit_count;
   t.stats.blit_bytes := !(t.stats.blit_bytes) + unfreeable_bytes;
@@ -336,7 +339,10 @@ let test () =
     ((), len)
   in
 
-  let t = create ~capacity:10 ~right_offset:(to63 1000) ~on_chunk in
+  let t =
+    create ~capacity:10 ~right_offset:(to63 1000) ~on_chunk
+      ~timings:Timings.(v Overhead)
+  in
   assert (capacity t = 10);
 
   (* On empty buffer *)

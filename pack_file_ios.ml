@@ -20,13 +20,18 @@ let really_read_physical_offsets ~fd ~buffer ~fd_offset ~buffer_offset ~length =
   in
   aux fd_offset buffer_offset length 0
 
-type t = { fd : Unix.file_descr; right_offset : int63; version : [ `V1 | `V2 ] }
+type t = {
+  fd : Unix.file_descr;
+  right_offset : int63;
+  version : [ `V1 | `V2 ];
+  timings : Timings.t;
+}
 (** [right_offset] is a virtual offset *)
 
 module Raw = Index_unix.Private.Raw
 module Version = Irmin_pack.Version
 
-let v path =
+let v path timings =
   Fmt.epr "Pack_file_ios: Opening %S\n%!" path;
   if not @@ Sys.file_exists path then failwith "Pack file doesn't exist";
   let fd = Unix.openfile path Unix.[ O_EXCL; O_RDONLY; O_CLOEXEC ] 0o644 in
@@ -38,7 +43,7 @@ let v path =
     | Some v -> v
     | None -> Version.invalid_arg v_string
   in
-  { fd; right_offset; version }
+  { fd; right_offset; version; timings }
 
 (** Conversions between virtual and physical offsets *)
 module Conversions = struct
@@ -114,6 +119,7 @@ let load_pages t { first; last } (f : int -> (bytes -> int -> unit) -> unit) =
   let length = Int63.distance ~hi:right_offset ~lo:left_offset in
   f length @@ fun buffer buffer_offset ->
   let bytes_read =
+    Timings.(with_section t.timings Read) @@ fun () ->
     really_read_virtual_offsets ~fd:t.fd ~fd_offset:left_offset ~buffer
       ~buffer_offset ~length
   in

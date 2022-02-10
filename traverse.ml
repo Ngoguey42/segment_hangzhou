@@ -51,92 +51,6 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
     type compress = Compress.t [@@deriving repr ~decode_bin]
   end
 
-  module Timings = struct
-    type section =
-      | Read
-      | Decode_inode
-      | Decode_length
-      | Priority_queue
-      | Blit
-      | Overhead
-      | Callback
-    [@@deriving repr ~pp]
-
-    let all =
-      [
-        Read;
-        Decode_inode;
-        Decode_length;
-        Priority_queue;
-        Blit;
-        Overhead;
-        Callback;
-      ]
-    (* TODO: Limit read to really_read *)
-
-    module M = Map.Make (struct
-      type t = section
-
-      let compare = compare
-    end)
-
-    type t = {
-      mutable current_section : section;
-      mutable totals : Mtime.Span.t M.t;
-      mutable counter : Mtime_clock.counter;
-    }
-
-    let pp : t Repr.pp =
-     fun ppf t ->
-      let elapsed = Mtime_clock.count t.counter in
-      let totals =
-        M.update t.current_section
-          (function
-            | None -> assert false
-            | Some so_far -> Some (Mtime.Span.add so_far elapsed))
-          t.totals
-      in
-      let total_span =
-        M.fold (fun _ -> Mtime.Span.add) totals Mtime.Span.zero
-      in
-      let total = Mtime.Span.to_s total_span in
-      Format.fprintf ppf "{\"Total\":%a(100%%)," Mtime.Span.pp total_span;
-
-      let pp_one ppf (section, elapsed) =
-        Format.fprintf ppf "%a:%a(%.1f%%)" pp_section section Mtime.Span.pp
-          elapsed
-          (Mtime.Span.to_s elapsed /. total *. 100.)
-      in
-      Format.fprintf ppf "%a}"
-        Fmt.(list ~sep:(any ",") pp_one)
-        (totals |> M.to_seq |> List.of_seq)
-
-    let v current_section =
-      let totals =
-        List.map (fun v -> (v, Mtime.Span.zero)) all |> List.to_seq |> M.of_seq
-      in
-      let counter = Mtime_clock.counter () in
-      { totals; counter; current_section }
-
-    let switch t next_section =
-      let elapsed = Mtime_clock.count t.counter in
-      t.totals <-
-        M.update t.current_section
-          (function
-            | None -> assert false
-            | Some so_far -> Some (Mtime.Span.add so_far elapsed))
-          t.totals;
-      t.counter <- Mtime_clock.counter ();
-      t.current_section <- next_section
-
-    let with_section t section f =
-      let parent_section = t.current_section in
-      switch t section;
-      let res = f () in
-      switch t parent_section;
-      res
-  end
-
   type stats = {
     hit : int ref;
     blindfolded_perfect : int ref;
@@ -216,10 +130,7 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
       IO.right_offset_of_page_idx folder.io guessed_page_range.last
     in
     Revbuffer.reset folder.buf page_range_right_offset;
-    let () =
-      Timings.(with_section folder.timings Read) @@ fun () ->
-      IO.load_pages folder.io guessed_page_range (Revbuffer.ingest folder.buf)
-    in
+    IO.load_pages folder.io guessed_page_range (Revbuffer.ingest folder.buf);
     let length = decode_entry_length folder left_offset in
     let actual_page_range = IO.page_range_of_offset_length left_offset length in
     if actual_page_range.last > guessed_page_range.last then (
@@ -230,7 +141,6 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
         IO.right_offset_of_page_idx folder.io actual_page_range.last
       in
       Revbuffer.reset folder.buf page_range_right_offset;
-      Timings.(with_section folder.timings Read) @@ fun () ->
       IO.load_pages folder.io actual_page_range (Revbuffer.ingest folder.buf))
     else if actual_page_range.last < guessed_page_range.last then
       (* Loaded too much *)
@@ -262,7 +172,6 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
              spans on [first_loaded_page_idx]. It doesn't matter, we can deal with
              both cases the same way. *)
           incr folder.stats.was_previous;
-          Timings.(with_section folder.timings Read) @@ fun () ->
           IO.load_page folder.io left_page_idx (Revbuffer.ingest folder.buf))
         else
           (* 4 - If the entry spans on 3 pages, we might have a suffix of it in
@@ -337,24 +246,27 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
     | None ->
         failwith "Traverse can't work with Contents not prefixed by length"
     | Some _ -> ());
+    let timings = Timings.(v Overhead) in
 
     let pq = Pq.create () in
     let push_entry = push_entry pq merge_payloads in
     List.iter (fun (off, payload) -> push_entry off payload) max_offsets;
 
     let acc = ref acc in
-    let on_chunk (c : Revbuffer.chunk) = acc := on_chunk !acc c in
+    let on_chunk (c : Revbuffer.chunk) =
+      Timings.(with_section timings Callback) @@ fun () ->
+      acc := on_chunk !acc c
+    in
 
     (* The choice for [right_offset] here is not important as the buffer will
        get reset for the first entry *)
     let buf =
       Revbuffer.create ~on_chunk ~capacity:buffer_capacity
-        ~right_offset:Int63.zero
+        ~right_offset:Int63.zero ~timings
     in
 
-    let io = IO.v (Filename.concat path "store.pack") in
+    let io = IO.v (Filename.concat path "store.pack") timings in
     let stats = fresh_stats () in
-    let timings = Timings.(v Overhead) in
     stats.peak_pq := Pq.length pq;
     let folder = { acc; buf; io; pq; stats; timings; merge_payloads } in
     traverse folder f;
