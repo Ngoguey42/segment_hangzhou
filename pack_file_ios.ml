@@ -37,6 +37,7 @@ let v path timings =
   let fd = Unix.openfile path Unix.[ O_EXCL; O_RDONLY; O_CLOEXEC ] 0o644 in
   let raw = Raw.v fd in
   let right_offset = Raw.Offset.get raw in
+  Fmt.epr "               right_offset: %#14d\n%!" (Int63.to_int right_offset);
   let version =
     let v_string = Raw.Version.get raw in
     match Version.of_bin v_string with

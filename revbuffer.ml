@@ -64,7 +64,12 @@ open Import
 
 type int63 = Int63.t [@@deriving repr]
 
-type stats = { blit_count : int ref; blit_bytes : int ref }
+type stats = {
+  soft_blit : int ref;
+  hard_blit : int ref;
+  soft_blit_bytes : int ref;
+  hard_blit_bytes : int ref;
+}
 [@@deriving repr ~pp]
 
 type current_chunk = { left : int63; right : int63 }
@@ -86,26 +91,32 @@ let create ~on_chunk ~capacity ~right_offset ~timings =
     occupied = 0;
     right_offset;
     current_chunk = None;
-    stats = { blit_count = ref 0; blit_bytes = ref 0 };
+    stats =
+      {
+        soft_blit = ref 0;
+        hard_blit = ref 0;
+        soft_blit_bytes = ref 0;
+        hard_blit_bytes = ref 0;
+      };
     on_chunk;
     timings;
   }
 
 let capacity { buf; _ } = Bytes.length buf
 
+let emit_chunk t c =
+  let left_offset = Int63.sub_distance t.right_offset t.occupied in
+  let dist_from_left = Int63.distance ~lo:left_offset ~hi:c.left in
+  t.on_chunk
+    {
+      buf = Bytes.unsafe_to_string t.buf;
+      i = capacity t - t.occupied + dist_from_left;
+      length = Int63.distance ~lo:c.left ~hi:c.right;
+      offset = c.left;
+    }
+
 let reset t right_offset =
-  (match t.current_chunk with
-  | None -> ()
-  | Some c ->
-      let left_offset = Int63.sub_distance t.right_offset t.occupied in
-      let dist_from_left = Int63.distance ~lo:left_offset ~hi:c.left in
-      t.on_chunk
-        {
-          buf = Bytes.unsafe_to_string t.buf;
-          i = capacity t - t.occupied + dist_from_left;
-          length = Int63.distance ~lo:c.left ~hi:c.right;
-          offset = c.left;
-        });
+  Option.iter (emit_chunk t) t.current_chunk;
   t.occupied <- 0;
   t.right_offset <- right_offset;
   t.current_chunk <- None
@@ -147,46 +158,43 @@ let perform_blit t unfreeable_bytes new_right_offset =
   let new_left_idx = capacity t - unfreeable_bytes in
   Timings.(with_section t.timings Blit) @@ fun () ->
   Bytes.blit t.buf old_left_idx t.buf new_left_idx unfreeable_bytes;
-  incr t.stats.blit_count;
-  t.stats.blit_bytes := !(t.stats.blit_bytes) + unfreeable_bytes;
   t.right_offset <- new_right_offset;
   t.occupied <- unfreeable_bytes
 
 let blit t missing_bytes byte_count =
   assert (missing_bytes > 0);
   match t.current_chunk with
-  | None -> t.occupied <- 0
+  | None ->
+      (* 1. Discard everything *)
+      t.occupied <- 0
   | Some c ->
       let left_offset = Int63.sub_distance t.right_offset t.occupied in
-      (* 1. Try to blit by preserving [c] in buf *)
+      (* 2. Try to blit by preserving [c] in buf *)
       let unfreeable_bytes = Int63.distance ~lo:left_offset ~hi:c.right in
       let freeable_bytes = Int63.distance ~lo:c.right ~hi:t.right_offset in
       assert (freeable_bytes >= 0);
       assert (unfreeable_bytes >= 0);
       assert (freeable_bytes + unfreeable_bytes = t.occupied);
-      if freeable_bytes >= missing_bytes then
-        perform_blit t unfreeable_bytes c.right
+      if freeable_bytes >= missing_bytes then (
+        incr t.stats.soft_blit;
+        t.stats.soft_blit_bytes := !(t.stats.soft_blit_bytes) + unfreeable_bytes;
+        perform_blit t unfreeable_bytes c.right)
       else
-        (* 2. Try to blit by ejecting [c] from buf *)
+        (* 3. Try to blit by ejecting [c] from buf *)
         let unfreeable_bytes = Int63.distance ~lo:left_offset ~hi:c.left in
         let freeable_bytes = Int63.distance ~lo:c.left ~hi:t.right_offset in
         assert (freeable_bytes >= 0);
         assert (unfreeable_bytes >= 0);
         assert (freeable_bytes + unfreeable_bytes = t.occupied);
         if freeable_bytes >= missing_bytes then (
-          let () =
-            let dist_from_left = Int63.distance ~lo:left_offset ~hi:c.left in
-            t.on_chunk
-              {
-                buf = Bytes.unsafe_to_string t.buf;
-                i = capacity t - t.occupied + dist_from_left;
-                length = Int63.distance ~lo:c.left ~hi:c.right;
-                offset = c.left;
-              }
-          in
+          emit_chunk t c;
           t.current_chunk <- None;
+          incr t.stats.hard_blit;
+          t.stats.hard_blit_bytes :=
+            !(t.stats.hard_blit_bytes) + unfreeable_bytes;
           perform_blit t unfreeable_bytes c.left)
         else
+          (* 4 - fail *)
           Fmt.failwith
             "Failed revbuffer ingestion.\n\
             \     buf:        capa:%#14d\n\
@@ -260,22 +268,13 @@ let read : t -> int63 -> (string -> int -> 'a * int) -> 'a =
     | Some c ->
         if not Int63.(right_read_offset <= c.right) then
           failwith "Wrong bytes_read";
-        (if Int63.(right_read_offset > c.left) then failwith "Wrong bytes_read"
+        if Int63.(right_read_offset > c.left) then failwith "Wrong bytes_read"
         else if Int63.(right_read_offset = c.left) then
           (* Continuity of chunk *)
           t.current_chunk <- Some { left = offset; right = c.right }
-        else
+        else (
           (* Discontinuity of previous chunk *)
-          let () =
-            let dist_from_left = Int63.distance ~lo:left_offset ~hi:c.left in
-            t.on_chunk
-              {
-                buf = Bytes.unsafe_to_string t.buf;
-                i = capacity t - t.occupied + dist_from_left;
-                length = Int63.distance ~lo:c.left ~hi:c.right;
-                offset = c.left;
-              }
-          in
+          emit_chunk t c;
           t.current_chunk <- Some { left = offset; right = right_read_offset });
         test_invariants t;
         res
@@ -310,9 +309,10 @@ let test () =
           Some { left; right })
     in
     let left_offset' = Int63.sub_distance right_offset t.occupied in
+    let blit' = !(t.stats.soft_blit) + !(t.stats.hard_blit) in
     assert (
       (left_offset, current_chunk_opt, right_offset, blit)
-      === (left_offset', t.current_chunk, t.right_offset, !(t.stats.blit_count)))
+      === (left_offset', t.current_chunk, t.right_offset, blit'))
   in
   let latest_chunk = ref None in
   let on_chunk c = latest_chunk := Some (c.i, c.length, c.offset) in

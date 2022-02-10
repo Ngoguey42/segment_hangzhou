@@ -102,14 +102,16 @@ let hash_of_string =
 let root_hash = hash_of_string root_hash
 let hash_to_bin_string = Repr.to_bin_string hash_t |> Repr.unstage
 
+(* TODO: maybe shift some of these stats to traverse et al? *)
 type acc = {
   entry_count : int;
   tot_length : int;
   tot_chunk : int;
   tot_chunk_algo : int;
   tot_length_chunk : int;
-  prev_chunk_left_offset : int63 option;
-  rightmost_chunk_left_offset : int63;
+  current_chunk : (int63 * int63) option;
+  largest_algo_chunk : int;
+  largest_chunk : int;
 }
 [@@deriving repr ~pp]
 
@@ -157,22 +159,31 @@ let accumulate acc (entry : _ Traverse.entry) =
 let on_chunk acc (chunk : Revbuffer.chunk) =
   let left_offset = chunk.offset in
   let right_offset = Int63.add_distance left_offset chunk.length in
-  let tot_chunk =
-    match acc.prev_chunk_left_offset with
-    | None -> 1
-    | Some off when Int63.(off = right_offset) -> acc.tot_chunk
-    | Some _ -> acc.tot_chunk + 1
+  let tot_chunk, current_chunk =
+    match acc.current_chunk with
+    | None ->
+        (* Very first algo_chunk of very first chunk *)
+        (1, (left_offset, right_offset))
+    | Some (left, right) when Int63.(left = right_offset) ->
+        (* Continuity of current_chunk *)
+        (acc.tot_chunk, (left_offset, right))
+    | Some _ ->
+        (* Beginning of new chunk *)
+        (acc.tot_chunk + 1, (left_offset, right_offset))
   in
-  let rightmost_chunk_left_offset =
-    if tot_chunk = 1 then left_offset else acc.rightmost_chunk_left_offset
+  let largest_algo_chunk = max acc.largest_algo_chunk chunk.length in
+  let largest_chunk =
+    max acc.largest_chunk
+      (Int63.distance ~lo:(fst current_chunk) ~hi:(snd current_chunk))
   in
   {
     acc with
     tot_chunk;
     tot_chunk_algo = acc.tot_chunk_algo + 1;
     tot_length_chunk = acc.tot_length_chunk + chunk.length;
-    prev_chunk_left_offset = Some left_offset;
-    rightmost_chunk_left_offset;
+    current_chunk = Some current_chunk;
+    largest_algo_chunk;
+    largest_chunk;
   }
 
 let main () =
@@ -226,8 +237,9 @@ let main () =
       tot_chunk = 0;
       tot_chunk_algo = 0;
       tot_length_chunk = 0;
-      prev_chunk_left_offset = None;
-      rightmost_chunk_left_offset = Int63.zero;
+      current_chunk = None;
+      largest_algo_chunk = 0;
+      largest_chunk = 0;
     }
   in
   let acc =

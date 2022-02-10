@@ -230,6 +230,7 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
       folder.stats.peak_pq := max !(folder.stats.peak_pq) (Pq.length folder.pq);
       traverse folder f
 
+  (* TODO: why [tot_chunk_algo - tot_chunk] is not [hard_blit] *)
   let fold :
       string ->
       'pl predecessors ->
