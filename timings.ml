@@ -12,7 +12,6 @@ let all =
   [
     Read; Decode_inode; Decode_length; Priority_queue; Blit; Overhead; Callback;
   ]
-(* TODO: Limit read to really_read *)
 
 module M = Map.Make (struct
   type t = section

@@ -149,9 +149,6 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
       incr folder.stats.blindfolded_perfect
 
   let ensure_entry_is_in_buf folder left_offset =
-    (* TODO: Some way of notifying when contiguous blocks are going to be
-       flushed. We only learn that an entry is the leftmost one of a chunk
-       at the next iteration loop. *)
     let left_page_idx = IO.page_idx_of_offset left_offset in
     match Revbuffer.first_offset_opt folder.buf with
     | None ->

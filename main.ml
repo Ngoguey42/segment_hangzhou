@@ -109,6 +109,7 @@ type acc = {
   tot_chunk_algo : int;
   tot_length_chunk : int;
   prev_chunk_left_offset : int63 option;
+  rightmost_chunk_left_offset : int63;
 }
 [@@deriving repr ~pp]
 
@@ -162,12 +163,16 @@ let on_chunk acc (chunk : Revbuffer.chunk) =
     | Some off when Int63.(off = right_offset) -> acc.tot_chunk
     | Some _ -> acc.tot_chunk + 1
   in
+  let rightmost_chunk_left_offset =
+    if tot_chunk = 1 then left_offset else acc.rightmost_chunk_left_offset
+  in
   {
     acc with
     tot_chunk;
     tot_chunk_algo = acc.tot_chunk_algo + 1;
     tot_length_chunk = acc.tot_length_chunk + chunk.length;
     prev_chunk_left_offset = Some left_offset;
+    rightmost_chunk_left_offset;
   }
 
 let main () =
@@ -213,6 +218,7 @@ let main () =
   in
   let root_left_offset = Key.offset root_key in
 
+  Fmt.epr "root_left_offset: %#14d\n%!" (Int63.to_int root_left_offset);
   let acc0 =
     {
       entry_count = 0;
@@ -221,6 +227,7 @@ let main () =
       tot_chunk_algo = 0;
       tot_length_chunk = 0;
       prev_chunk_left_offset = None;
+      rightmost_chunk_left_offset = Int63.zero;
     }
   in
   let acc =

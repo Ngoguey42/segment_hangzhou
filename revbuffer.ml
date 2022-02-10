@@ -16,7 +16,7 @@
 
     See how the data structure behaves concretely in this example:
 
-    TODO: Rewrite all
+    TODO: Rewrite all doc
 
     {v
     # First create an empty revbuffer
@@ -126,8 +126,7 @@ let show t =
     (match t.current_chunk with None -> -1 | Some c -> Int63.to_int c.right)
     (Int63.to_int right_offset)
 
-(* TODO: Count number of bytes blited *)
-(* TODO : Threshold  to avoid blit *)
+(* TODO : Threshold to avoid blit? *)
 
 let first_offset_opt t =
   if t.occupied = 0 then None
@@ -316,10 +315,7 @@ let test () =
       === (left_offset', t.current_chunk, t.right_offset, !(t.stats.blit_count)))
   in
   let latest_chunk = ref None in
-  let on_chunk c =
-    Fmt.epr "%d %d %d\n%!" c.i c.length (Int63.to_int c.offset);
-    latest_chunk := Some (c.i, c.length, c.offset)
-  in
+  let on_chunk c = latest_chunk := Some (c.i, c.length, c.offset) in
   let ingest ?chunk t count f =
     latest_chunk := None;
     let chunk = Option.bind chunk (fun (a, b, c) -> Some (a, b, to63 c)) in
