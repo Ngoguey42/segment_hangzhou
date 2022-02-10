@@ -64,7 +64,7 @@ open Import
 
 type int63 = Int63.t [@@deriving repr]
 
-type stats = { blit_count : int ref; on_chunk_count : int ref }
+type stats = { blit_count : int ref; blit_bytes : int ref }
 [@@deriving repr ~pp]
 
 type current_chunk = { left : int63; right : int63 }
@@ -85,7 +85,7 @@ let create ~on_chunk ~capacity ~right_offset =
     occupied = 0;
     right_offset;
     current_chunk = None;
-    stats = { blit_count = ref 0; on_chunk_count = ref 0 };
+    stats = { blit_count = ref 0; blit_bytes = ref 0 };
     on_chunk;
   }
 
@@ -146,6 +146,7 @@ let perform_blit t unfreeable_bytes new_right_offset =
   let new_left_idx = capacity t - unfreeable_bytes in
   Bytes.blit t.buf old_left_idx t.buf new_left_idx unfreeable_bytes;
   incr t.stats.blit_count;
+  t.stats.blit_bytes := !(t.stats.blit_bytes) + unfreeable_bytes;
   t.right_offset <- new_right_offset;
   t.occupied <- unfreeable_bytes
 
@@ -257,13 +258,12 @@ let read : t -> int63 -> (string -> int -> 'a * int) -> 'a =
     | Some c ->
         if not Int63.(right_read_offset <= c.right) then
           failwith "Wrong bytes_read";
-        if Int63.(right_read_offset > c.left) then failwith "Wrong bytes_read"
+        (if Int63.(right_read_offset > c.left) then failwith "Wrong bytes_read"
         else if Int63.(right_read_offset = c.left) then
           (* Continuity of chunk *)
           t.current_chunk <- Some { left = offset; right = c.right }
-        else (
+        else
           (* Discontinuity of previous chunk *)
-          incr t.stats.on_chunk_count;
           let () =
             let dist_from_left = Int63.distance ~lo:left_offset ~hi:c.left in
             t.on_chunk
