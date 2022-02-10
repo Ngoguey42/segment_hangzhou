@@ -141,7 +141,8 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
       peak_pq = ref 0;
     }
 
-  type 'pl folder = {
+  type ('acc, 'pl) folder = {
+    acc : 'acc ref;
     pq : 'pl Pq.t;
     buf : Revbuffer.t;
     io : IO.t;
@@ -186,7 +187,7 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
     let suffix_length = Varint.decode_bin buf pos_ref in
     let length_length = !pos_ref - ilength in
     Timings.(switch folder.timings Overhead);
-    Hash.hash_size + 1 + length_length + suffix_length, 0
+    (Hash.hash_size + 1 + length_length + suffix_length, 0)
 
   let blindfolded_load_entry_in_buf folder left_offset =
     let guessed_length =
@@ -263,24 +264,25 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
     match kind with
     | Inode_v1_unstable | Inode_v1_stable | Commit_v1 | Commit_v2 ->
         Fmt.failwith "unhandled %a" pp_kind kind
-    | Contents -> `Contents, length
+    | Contents -> (`Contents, length)
     | Inode_v2_root | Inode_v2_nonroot ->
         Timings.(switch folder.timings Decode_inode);
         let v = Inode.decode_bin_compress buf (ref i0) in
         Timings.(switch folder.timings Overhead);
-        `Inode v, length
+        (`Inode v, length)
 
   let push_entry pq merge_payloads off newer =
     Pq.update pq off (function
       | None -> newer
       | Some older -> merge_payloads off ~older ~newer)
 
-  let rec traverse folder f acc =
+  let rec traverse folder f =
     if Pq.is_empty folder.pq then (
+      (* reset buffer to trigger a last [on_chunk] *)
+      Revbuffer.reset folder.buf Int63.zero;
       Fmt.epr "%a\n%!" pp_stats folder.stats;
       Revbuffer.(Fmt.epr "%a\n%!" pp_stats folder.buf.stats);
-      Fmt.epr "%a\n%!" Timings.pp folder.timings;
-      acc)
+      Fmt.epr "%a\n%!" Timings.pp folder.timings)
     else (
       Timings.(switch folder.timings Priority_queue);
       let offset, payload = Pq.pop_exn folder.pq in
@@ -290,7 +292,8 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
       let v = decode_entry folder offset length in
       let entry = { offset; length; v; payload } in
       Timings.(switch folder.timings Callback);
-      let acc, predecessors = f acc entry in
+      let acc, predecessors = f !(folder.acc) entry in
+      folder.acc := acc;
       Timings.(switch folder.timings Overhead);
       Timings.(switch folder.timings Priority_queue);
       List.iter
@@ -301,34 +304,41 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
         predecessors;
       Timings.(switch folder.timings Overhead);
       folder.stats.peak_pq := max !(folder.stats.peak_pq) (Pq.length folder.pq);
-      traverse folder f acc)
-
-  let on_chunk (c : Revbuffer.chunk) =
-    ignore c
-    (* Fmt.epr "Chunk: %d\n%!" c.length *)
+      traverse folder f)
 
   let fold :
       string ->
       'pl predecessors ->
       (int63 -> older:'pl -> newer:'pl -> 'pl) ->
       ('a -> 'pl entry -> 'a * 'pl predecessors) ->
+      ('a -> Revbuffer.chunk -> 'a) ->
       'a ->
       'a =
-   fun path max_offsets merge_payloads f acc ->
+   fun path max_offsets merge_payloads f on_chunk acc ->
     (match Conf.contents_length_header with
     | None ->
         failwith "Traverse can't work with Contents not prefixed by length"
     | Some _ -> ());
-    let io = IO.v (Filename.concat path "store.pack") in
+
     let pq = Pq.create () in
-    (* The choice for [right_offset] here is not important as the buffer will
-       get reset for the first entry *)
-    let buf = Revbuffer.create ~on_chunk ~capacity:buffer_capacity ~right_offset:Int63.zero in
     let push_entry = push_entry pq merge_payloads in
     List.iter (fun (off, payload) -> push_entry off payload) max_offsets;
+
+    let acc = ref acc in
+    let on_chunk (c : Revbuffer.chunk) = acc := on_chunk !acc c in
+
+    (* The choice for [right_offset] here is not important as the buffer will
+       get reset for the first entry *)
+    let buf =
+      Revbuffer.create ~on_chunk ~capacity:buffer_capacity
+        ~right_offset:Int63.zero
+    in
+
+    let io = IO.v (Filename.concat path "store.pack") in
     let stats = fresh_stats () in
     let timings = Timings.(v Overhead) in
     stats.peak_pq := Pq.length pq;
-    let folder = { buf; io; pq; stats; timings; merge_payloads } in
-    traverse folder f acc
+    let folder = { acc; buf; io; pq; stats; timings; merge_payloads } in
+    traverse folder f;
+    !(folder.acc)
 end

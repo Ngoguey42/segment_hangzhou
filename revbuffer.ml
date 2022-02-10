@@ -16,7 +16,8 @@
 
     See how the data structure behaves concretely in this example:
 
-TODO: Rewrite all
+    TODO: Rewrite all
+
     {v
     # First create an empty revbuffer
     > create ~capacity:6 ~right_offset:100
@@ -91,6 +92,18 @@ let create ~on_chunk ~capacity ~right_offset =
 let capacity { buf; _ } = Bytes.length buf
 
 let reset t right_offset =
+  (match t.current_chunk with
+  | None -> ()
+  | Some c ->
+      let left_offset = Int63.sub_distance t.right_offset t.occupied in
+      let dist_from_left = Int63.distance ~lo:left_offset ~hi:c.left in
+      t.on_chunk
+        {
+          buf = Bytes.unsafe_to_string t.buf;
+          i = capacity t - t.occupied + dist_from_left;
+          length = Int63.distance ~lo:c.left ~hi:c.right;
+          offset = c.left;
+        });
   t.occupied <- 0;
   t.right_offset <- right_offset;
   t.current_chunk <- None
@@ -110,6 +123,9 @@ let show t =
     (match t.current_chunk with None -> -1 | Some c -> Int63.to_int c.left)
     (match t.current_chunk with None -> -1 | Some c -> Int63.to_int c.right)
     (Int63.to_int right_offset)
+
+(* TODO: Count number of bytes blited *)
+(* TODO : Threshold  to avoid blit *)
 
 let first_offset_opt t =
   if t.occupied = 0 then None

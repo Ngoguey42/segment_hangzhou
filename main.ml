@@ -2,6 +2,50 @@
 
     Requires https://github.com/Ngoguey42/irmin/pull/new/expose-compress *)
 
+(*
+   - genre: (blob-{0-31,32-127,128,511,512+}|inode-{root,inner}-{tree,val})
+
+   collected infos:
+   - "per commit tree" x "per pack-file-area" x "per path prefix" x "per genre"
+     - # of entries
+     - # of bytes used
+   - "per commit tree" x "per pack-file-area" x "per path prefix" x ()
+     - # of bytes used by hard-coded steps
+     - # of hard-coded steps
+     - # of dict steps
+   - "per commit tree" x "per pack-file-area" x ()                x ()
+     - # of pages touched
+     - # of chunks (contiguous groups)
+   - () x                "per pack-file-area" x "per path prefix" x "per genre + commit"
+     - # of total entries (needed for leftover calculation)
+     - # of total bytes used (needed for leftover calculation)
+
+   not needed?
+   - () x                "per pack-file-area" x ()                x ()
+     - # of bytes
+     - # of entries
+
+   missing infos:
+   - which area references which area? (i.e. analysis of pq when changing area)
+   - intersection between trees
+   - the traversal itself (c'est seulement utile si je traverse un seul commit lol)
+     - traversal timings
+     - stats on size of pq
+     - distribution of situations on pull
+       - also include number of pulled pages?
+     - buffer blits
+
+   to show:
+   - (leftward horizontal histogram?) averaged on all ref commits
+     - at which cycle-distance are all genre (entry weighted / bytes weighted)
+     - at which cycle-distance are all paths (entry weighted / bytes weighted)
+   - (camembert) averaged on all ref commits + (curves) evolution for all ref commits
+     - at which cycle-distance are the entries (entry weighted / bytes weighted)
+     - number in each genre  (entry weighted / bytes weighted)
+     - number in each directory (entry weighted / bytes weighted)
+     - which path grows the most (entry weighted / bytes weighted)
+*)
+
 module Hash = Irmin_tezos.Schema.Hash
 module Maker = Irmin_pack.Maker (Irmin_tezos.Conf)
 module Store = Maker.Make (Irmin_tezos.Schema)
@@ -58,7 +102,16 @@ let hash_of_string =
 let root_hash = hash_of_string root_hash
 let hash_to_bin_string = Repr.to_bin_string hash_t |> Repr.unstage
 
-type acc = { entry_count : int; tot_length : int } [@@deriving repr ~pp]
+type acc = {
+  entry_count : int;
+  tot_length : int;
+  tot_chunk : int;
+  tot_chunk_algo : int;
+  tot_length_chunk : int;
+  prev_chunk_left_offset : int63 option;
+}
+[@@deriving repr ~pp]
+
 type p = Payload
 
 let offset_of_address =
@@ -93,11 +146,29 @@ let accumulate acc (entry : _ Traverse.entry) =
   let preds = List.map (fun off -> (off, Payload)) preds in
   let acc =
     {
+      acc with
       entry_count = acc.entry_count + 1;
       tot_length = acc.tot_length + entry.length;
     }
   in
   (acc, preds)
+
+let on_chunk acc (chunk : Revbuffer.chunk) =
+  let left_offset = chunk.offset in
+  let right_offset = Int63.add_distance left_offset chunk.length in
+  let tot_chunk =
+    match acc.prev_chunk_left_offset with
+    | None -> 1
+    | Some off when Int63.(off = right_offset) -> acc.tot_chunk
+    | Some _ -> acc.tot_chunk + 1
+  in
+  {
+    acc with
+    tot_chunk;
+    tot_chunk_algo = acc.tot_chunk_algo + 1;
+    tot_length_chunk = acc.tot_length_chunk + chunk.length;
+    prev_chunk_left_offset = Some left_offset;
+  }
 
 let main () =
   Fmt.epr "Hello World\n%!";
@@ -142,12 +213,21 @@ let main () =
   in
   let root_left_offset = Key.offset root_key in
 
-  let acc0 = { entry_count = 0; tot_length = 0 } in
+  let acc0 =
+    {
+      entry_count = 0;
+      tot_length = 0;
+      tot_chunk = 0;
+      tot_chunk_algo = 0;
+      tot_length_chunk = 0;
+      prev_chunk_left_offset = None;
+    }
+  in
   let acc =
     Traverse.fold path
       [ (root_left_offset, Payload) ]
       (fun _off ~older:Payload ~newer:Payload -> Payload)
-      accumulate acc0
+      accumulate on_chunk acc0
   in
   Fmt.epr "%a\n%!" pp_acc acc;
   ignore acc;
@@ -156,47 +236,3 @@ let main () =
   Lwt.return_unit
 
 let () = Lwt_main.run (main ())
-
-(*
-   - genre: (blob-{0-31,32-127,128,511,512+}|inode-{root,inner}-{tree,val})
-
-   collected infos:
-   - "per commit tree" x "per pack-file-area" x "per path prefix" x "per genre"
-     - # of entries
-     - # of bytes used
-   - "per commit tree" x "per pack-file-area" x "per path prefix" x ()
-     - # of bytes used by hard-coded steps
-     - # of hard-coded steps
-     - # of dict steps
-   - "per commit tree" x "per pack-file-area" x ()                x ()
-     - # of pages touched
-     - # of chunks (contiguous groups)
-   - () x                "per pack-file-area" x "per path prefix" x "per genre + commit"
-     - # of total entries (needed for leftover calculation)
-     - # of total bytes used (needed for leftover calculation)
-
-   not needed?
-   - () x                "per pack-file-area" x ()                x ()
-     - # of bytes
-     - # of entries
-
-   missing infos:
-   - which area references which area? (i.e. analysis of pq when changing area)
-   - intersection between trees
-   - the traversal itself (c'est seulement utile si je traverse un seul commit lol)
-     - traversal timings
-     - stats on size of pq
-     - distribution of situations on pull
-       - also include number of pulled pages?
-     - buffer blits
-
-   to show:
-   - (leftward horizontal histogram?) averaged on all ref commits
-     - at which cycle-distance are all genre (entry weighted / bytes weighted)
-     - at which cycle-distance are all paths (entry weighted / bytes weighted)
-   - (camembert) averaged on all ref commits + (curves) evolution for all ref commits
-     - at which cycle-distance are the entries (entry weighted / bytes weighted)
-     - number in each genre  (entry weighted / bytes weighted)
-     - number in each directory (entry weighted / bytes weighted)
-     - which path grows the most (entry weighted / bytes weighted)
-*)
