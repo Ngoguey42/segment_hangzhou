@@ -178,7 +178,7 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
 
   let decode_entry_length folder offset =
     Timings.(switch folder.timings Decode_length);
-    Revbuffer.read ~mark_dirty:false folder.buf offset @@ fun buf i0 ->
+    Revbuffer.read folder.buf offset @@ fun buf i0 ->
     let available_bytes = String.length buf - i0 in
     assert (available_bytes >= min_bytes_needed_to_discover_length);
     let ilength = i0 + Hash.hash_size + 1 in
@@ -186,7 +186,7 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
     let suffix_length = Varint.decode_bin buf pos_ref in
     let length_length = !pos_ref - ilength in
     Timings.(switch folder.timings Overhead);
-    Hash.hash_size + 1 + length_length + suffix_length
+    Hash.hash_size + 1 + length_length + suffix_length, 0
 
   let blindfolded_load_entry_in_buf folder left_offset =
     let guessed_length =
@@ -255,7 +255,7 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
           blindfolded_load_entry_in_buf folder left_offset
 
   let decode_entry folder offset length =
-    Revbuffer.read ~mark_dirty:true folder.buf offset @@ fun buf i0 ->
+    Revbuffer.read folder.buf offset @@ fun buf i0 ->
     let available_bytes = String.length buf - i0 in
     assert (available_bytes >= length);
     let imagic = i0 + Hash.hash_size in
@@ -263,12 +263,12 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
     match kind with
     | Inode_v1_unstable | Inode_v1_stable | Commit_v1 | Commit_v2 ->
         Fmt.failwith "unhandled %a" pp_kind kind
-    | Contents -> `Contents
+    | Contents -> `Contents, length
     | Inode_v2_root | Inode_v2_nonroot ->
         Timings.(switch folder.timings Decode_inode);
         let v = Inode.decode_bin_compress buf (ref i0) in
         Timings.(switch folder.timings Overhead);
-        `Inode v
+        `Inode v, length
 
   let push_entry pq merge_payloads off newer =
     Pq.update pq off (function
@@ -303,6 +303,10 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
       folder.stats.peak_pq := max !(folder.stats.peak_pq) (Pq.length folder.pq);
       traverse folder f acc)
 
+  let on_chunk (c : Revbuffer.chunk) =
+    ignore c
+    (* Fmt.epr "Chunk: %d\n%!" c.length *)
+
   let fold :
       string ->
       'pl predecessors ->
@@ -317,7 +321,9 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
     | Some _ -> ());
     let io = IO.v (Filename.concat path "store.pack") in
     let pq = Pq.create () in
-    let buf = Revbuffer.create ~capacity:buffer_capacity in
+    (* The choice for [right_offset] here is not important as the buffer will
+       get reset for the first entry *)
+    let buf = Revbuffer.create ~on_chunk ~capacity:buffer_capacity ~right_offset:Int63.zero in
     let push_entry = push_entry pq merge_payloads in
     List.iter (fun (off, payload) -> push_entry off payload) max_offsets;
     let stats = fresh_stats () in

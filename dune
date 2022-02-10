@@ -4,7 +4,7 @@
 )
 
 (executable
-(name revbuffer)
+(name main)
 (libraries unix mtime mtime.clock.os fmt irmin-tezos optint progress repr ppx_repr
 
 )
