@@ -78,26 +78,31 @@ let loc =
 let path =
   match loc with
   | `Home ->
-      "/home/nico/tz/hangzu_plus2_1916931_BLu79NTncAFXHiwoHDwir4BDjh2Bdc7jgL71QYGkjv2c2oD8FwZ/store_post_node_run/context"
+      "/home/nico/r/irmin/_artefacts/1f1548b9-b7d2-433b-b199-ef376b567951/store"
+      (* "/home/nico/r/irmin/_artefacts/050a1e79-be77-45e5-a833-b963a3aad2d8/store" *)
+      (* "/home/nico/r/irmin/_artefacts/45994b5d-94ed-4143-b0e5-3ba28f6f7a8e/store" *)
+      (* "/mnt/y/tz/replay/none_a/store" *)
+      (* "/home/nico/r/irmin/_artefacts/99e9b48e-4a9d-48d7-b9c3-4658104e4d48/store" *)
+      (* "/home/nico/tz/hangzu_plus2_1916931_BLu79NTncAFXHiwoHDwir4BDjh2Bdc7jgL71QYGkjv2c2oD8FwZ/store_imported/context" *)
   | `Com ->
       "/home/ngoguey/bench/ro/hangzu_plus2_1916931_BLu79NTncAFXHiwoHDwir4BDjh2Bdc7jgL71QYGkjv2c2oD8FwZ/store_post_node_run/context/"
 
-let root_hash =
-  match loc with
-  | `Home ->
-      (* https://tzkt.io/1916931 *)
-      (* CYCLE & POSITION 428 (2 of 8192) *)
-      "CoV6QV47kn2oRnTihfjAC3dKPfrjEZjojMXVEYBLPYM7EmFkDqdS"
-  | `Com ->
-      (* https://tzkt.io/2056193 *)
-      (* CYCLE & POSITION 445 (0 of 8192) *)
-      "CoWMUSFj7gp4LngpAhaZa62xPYZcKWMyr4Wnh14CcyyQWsPrghLx"
+(* let root_hash =
+ *   match loc with
+ *   | `Home ->
+ *       (\* https://tzkt.io/1916931 *\)
+ *       (\* CYCLE & POSITION 428 (2 of 8192) *\)
+ *       "CoV6QV47kn2oRnTihfjAC3dKPfrjEZjojMXVEYBLPYM7EmFkDqdS"
+ *   | `Com ->
+ *       (\* https://tzkt.io/2056193 *\)
+ *       (\* CYCLE & POSITION 445 (0 of 8192) *\)
+ *       "CoWMUSFj7gp4LngpAhaZa62xPYZcKWMyr4Wnh14CcyyQWsPrghLx" *)
 
 let hash_of_string =
   let f = Repr.of_string Irmin_tezos.Schema.Hash.t in
   fun x -> match f x with Error (`Msg x) -> failwith x | Ok v -> v
 
-let root_hash = hash_of_string root_hash
+(* let root_hash = hash_of_string root_hash *)
 let hash_to_bin_string = Repr.to_bin_string hash_t |> Repr.unstage
 
 (* TODO: maybe shift some of these stats to traverse et al? *)
@@ -195,74 +200,86 @@ let on_chunk acc (chunk : Revbuffer.chunk) =
     largest_chunk;
   }
 
-let main () =
-  Fmt.epr "Hello World\n%!";
-
-  let conf = Irmin_pack.config ~fresh:false ~readonly:true path in
-  let* repo = Store.Repo.v conf in
-  let* cycles =
-    Lwt_list.fold_left_s
-      (fun acc (cycle : Cycles.t) ->
-        let h = hash_of_string cycle.context_hash in
-        let* commit_opt = Store.Commit.of_hash repo h in
-        let acc =
-          Option.fold ~none:acc
-            ~some:(fun c ->
-              let k = Store.Commit.key c in
-              let offset =
-                match Key.inspect k with
-                | Indexed _ -> assert false
-                | Direct { offset; _ } -> offset
-              in
-              Fmt.epr "pack store contains %a at offset %#14d\n%!" Cycles.pp
-                cycle (Int63.to_int offset);
-              (cycle, c) :: acc)
-            commit_opt
-        in
-        Lwt.return acc)
-      [] Cycles.l
-  in
-  Fmt.epr "pack-store contains %d cycles\n%!" (List.length cycles);
-
-  let* commit_opt = Store.Commit.of_hash repo root_hash in
-  let commit =
-    match commit_opt with
-    | None -> failwith "Could not find root_hash in index"
-    | Some c -> c
-  in
-  let root_key =
+let root_node_offset_of_commit commit =
+  let k =
     match Store.Commit.tree commit |> Store.Tree.key with
     | None -> assert false
     | Some (`Contents _) -> assert false
     | Some (`Node k) -> k
   in
-  let root_left_offset = Key.offset root_key in
-
-  Fmt.epr "root_left_offset: %#14d\n%!" (Int63.to_int root_left_offset);
-  let acc0 =
-    {
-      entry_count = 0;
-      tot_length = 0;
-      tot_chunk = 0;
-      tot_chunk_algo = 0;
-      tot_length_chunk = 0;
-      current_chunk = None;
-      largest_algo_chunk = 0;
-      largest_chunk = 0;
-      emission_reset = 0;
-      emission_witnessed = 0;
-      emission_oos = 0;
-    }
+  let offset =
+    match Key.inspect k with
+    | Indexed _ -> assert false
+    | Direct { offset; _ } -> offset
   in
-  let acc =
-    Traverse.fold path
-      [ (root_left_offset, Payload) ]
-      (fun _off ~older:Payload ~newer:Payload -> Payload)
-      accumulate on_chunk acc0
-  in
-  Fmt.epr "%a\n%!" pp_acc acc;
-  ignore acc;
+  offset
 
+let lookup_cycles_in_repo repo =
+  let+ l =
+    Lwt_list.fold_left_s
+      (fun acc (cycle : Cycle_start.t) ->
+        let h = hash_of_string cycle.context_hash in
+        let* commit_opt = Store.Commit.of_hash repo h in
+        let acc =
+          Option.fold ~none:acc
+            ~some:(fun commit ->
+              let offset = root_node_offset_of_commit commit in
+              (* Fmt.epr "pack store contains %a at offset %#14d\n%!" Cycle_start.pp *)
+              (* cycle (Int63.to_int offset); *)
+              (cycle, offset) :: acc)
+            commit_opt
+        in
+        Lwt.return acc)
+      [] Cycle_start.all
+  in
+  List.rev l
+
+let main () =
+  Fmt.epr "Hello World\n%!";
+
+  let conf = Irmin_pack.config ~fresh:false ~readonly:true path in
+  let* repo = Store.Repo.v conf in
+  let* cycles = lookup_cycles_in_repo repo in
+  Fmt.epr "pack-store contains %d cycles\n%!" (List.length cycles);
+
+  List.iter
+    (fun (cycle, offset) ->
+      Fmt.epr "pack store contains %a at offset %#14d\n%!" Cycle_start.pp cycle
+        (Int63.to_int offset);
+      let acc0 =
+        {
+          entry_count = 0;
+          tot_length = 0;
+          tot_chunk = 0;
+          tot_chunk_algo = 0;
+          tot_length_chunk = 0;
+          current_chunk = None;
+          largest_algo_chunk = 0;
+          largest_chunk = 0;
+          emission_reset = 0;
+          emission_witnessed = 0;
+          emission_oos = 0;
+        }
+      in
+      let acc =
+        Traverse.fold path
+          [ (offset, Payload) ]
+          (fun _off ~older:Payload ~newer:Payload -> Payload)
+          accumulate on_chunk acc0
+      in
+      Fmt.epr "%a\n%!" pp_acc acc;
+      Fmt.epr "\n%!";
+      Fmt.epr "\n%!";
+      Fmt.epr "\n%!")
+    cycles;
+
+  (* let* commit_opt = Store.Commit.of_hash repo root_hash in
+   * let commit =
+   *   match commit_opt with
+   *   | None -> failwith "Could not find root_hash in index"
+   *   | Some c -> c
+   * in
+   * let offset = root_node_offset_of_commit commit in *)
   Fmt.epr "Bye World\n%!";
   Lwt.return_unit
 

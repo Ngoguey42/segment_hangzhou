@@ -48,7 +48,7 @@ v}
  *)
 
 type t = {
-  cycle : int;
+  cycle_idx : int;
   level : int;
   protocol : int;
   timestamp : string;
@@ -56,10 +56,10 @@ type t = {
 }
 [@@deriving repr ~pp]
 
-let row cycle level protocol timestamp context_hash =
-  { cycle; level; protocol; timestamp; context_hash }
+let row cycle_idx level protocol timestamp context_hash =
+  { cycle_idx; level; protocol; timestamp; context_hash }
 
-let l =
+let all =
   [
     row 0 1 1 "2018-06-30T17:39:57Z"
       "CoV8t66qHkNAfDNB7aUUqri5nqtzC72bE9Hx28u6q1C3WzMCHbkm";
