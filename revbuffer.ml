@@ -64,14 +64,6 @@ open Import
 
 type int63 = Int63.t [@@deriving repr]
 
-type stats = {
-  soft_blit : int ref;
-  hard_blit : int ref;
-  soft_blit_bytes : int ref;
-  hard_blit_bytes : int ref;
-}
-[@@deriving repr ~pp]
-
 type current_chunk = { left : int63; right : int63 }
 
 type chunk = {
@@ -106,9 +98,9 @@ type t = {
   mutable occupied : int;
   mutable right_offset : int63;
   mutable current_chunk : current_chunk option;
-  stats : stats;
   on_chunk : chunk -> unit;
   timings : Timings.t;
+  stats : Stats.t;
 }
 
 (** Hello
@@ -128,21 +120,15 @@ type t = {
     {2 Virtual offsets}
 
     {2 Read chunks} *)
-let create ~on_chunk ~capacity ~right_offset ~timings =
+let create ~on_chunk ~capacity ~right_offset ~timings ~stats =
   {
     buf = Bytes.create capacity;
     occupied = 0;
     right_offset;
     current_chunk = None;
-    stats =
-      {
-        soft_blit = ref 0;
-        hard_blit = ref 0;
-        soft_blit_bytes = ref 0;
-        hard_blit_bytes = ref 0;
-      };
     on_chunk;
     timings;
+    stats;
   }
 
 let capacity { buf; _ } = Bytes.length buf [@@inline always]
@@ -379,6 +365,7 @@ let test () =
   let t =
     create ~capacity:10 ~right_offset:(to63 1000) ~on_chunk
       ~timings:Timings.(v Overhead)
+      ~stats:(Stats.v ())
   in
   assert (capacity t = 10);
 
