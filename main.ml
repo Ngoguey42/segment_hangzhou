@@ -20,20 +20,9 @@
      - # of total entries (needed for leftover calculation)
      - # of total bytes used (needed for leftover calculation)
 
-   not needed?
-   - () x                "per pack-file-area" x ()                x ()
-     - # of bytes
-     - # of entries
-
    missing infos:
    - which area references which area? (i.e. analysis of pq when changing area)
    - intersection between trees
-   - the traversal itself (c'est seulement utile si je traverse un seul commit lol)
-     - traversal timings
-     - stats on size of pq
-     - distribution of situations on pull
-       - also include number of pulled pages?
-     - buffer blits
 
    to show:
    - (leftward horizontal histogram?) averaged on all ref commits
@@ -44,6 +33,15 @@
      - number in each genre  (entry weighted / bytes weighted)
      - number in each directory (entry weighted / bytes weighted)
      - which path grows the most (entry weighted / bytes weighted)
+
+    morallement, quelles info je veux:
+    -
+    -
+    -
+    -
+    -
+    -
+
 *)
 
 module Hash = Irmin_tezos.Schema.Hash
@@ -112,6 +110,9 @@ type acc = {
   current_chunk : (int63 * int63) option;
   largest_algo_chunk : int;
   largest_chunk : int;
+  emission_reset : int;
+  emission_witnessed : int;
+  emission_oos : int;
 }
 [@@deriving repr ~pp]
 
@@ -162,6 +163,7 @@ let on_chunk acc (chunk : Revbuffer.chunk) =
   let tot_chunk, current_chunk =
     match acc.current_chunk with
     | None ->
+        assert (acc.tot_chunk = 0);
         (* Very first algo_chunk of very first chunk *)
         (1, (left_offset, right_offset))
     | Some (left, right) when Int63.(left = right_offset) ->
@@ -175,6 +177,13 @@ let on_chunk acc (chunk : Revbuffer.chunk) =
   let largest_chunk =
     max acc.largest_chunk
       (Int63.distance ~lo:(fst current_chunk) ~hi:(snd current_chunk))
+  in
+  let acc =
+    match chunk.emission_reason with
+    | `Reset -> { acc with emission_reset = acc.emission_reset + 1 }
+    | `Witnessed_discontinuity ->
+        { acc with emission_witnessed = acc.emission_witnessed + 1 }
+    | `Out_of_space -> { acc with emission_oos = acc.emission_oos + 1 }
   in
   {
     acc with
@@ -240,6 +249,9 @@ let main () =
       current_chunk = None;
       largest_algo_chunk = 0;
       largest_chunk = 0;
+      emission_reset = 0;
+      emission_witnessed = 0;
+      emission_oos = 0;
     }
   in
   let acc =

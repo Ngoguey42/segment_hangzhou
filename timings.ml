@@ -5,12 +5,12 @@ type section =
   | Priority_queue
   | Blit
   | Overhead
-  | Callback
+  | Callbacks
 [@@deriving repr ~pp]
 
 let all =
   [
-    Read; Decode_inode; Decode_length; Priority_queue; Blit; Overhead; Callback;
+    Read; Decode_inode; Decode_length; Priority_queue; Blit; Overhead; Callbacks;
   ]
 
 module M = Map.Make (struct

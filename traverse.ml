@@ -1,12 +1,6 @@
-(** Traverse *)
+(** Traverse
 
-(** Maximum number of bytes from disk to keep in memory at once.
-
-    A lower value uses less memory.
-
-    A higher value minimises the number of [blit] in [buf].
-
-    In an entry ever has a size over [buffer_capacity], the program will crash.
+    {2 Naming of Ranges}
 
     Throughout the code [left] and [right] are the names used to designate
     classic ranges where [left] is the beginning of a range and [right] is
@@ -14,12 +8,17 @@
 
     Throughout the code [first] and [last] are the names used to designate
     non-empty ranges where [first] is the index of the first element of the
-    range and [last] is [first + length - 1]. *)
-let buffer_capacity = 4096 * 100
+    range and [last] is [first + length - 1].
+
+    Finally, ranges may alternatively be designated under [left, length] or
+    [first, length]. *)
+
+let buffer_capacity = 4096 * 4096
 
 (** The optimal [expected_entry_size] minimises
-    [blindfolded_too_much + blindfolded_not_enough]. [50] showed good results
-    experimentally. *)
+    [stats.blindfolded_too_much + stats.blindfolded_not_enough].
+
+    [50] showed good results experimentally. *)
 let expected_entry_size = 50
 
 open Import
@@ -82,8 +81,6 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
         (* Can't put timings in stats because of repr bug on custom pp *)
   }
 
-  (* TODO: Decode blob *)
-  (* TODO: Add commit *)
   type 'pl entry = {
     offset : int63;
     length : int;
@@ -107,6 +104,7 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
   let max_bytes_needed_to_discover_length =
     Hash.hash_size + 1 + Varint.max_encoded_size
 
+  (** Read the length of an entry without tagging the read in [buf]. *)
   let decode_entry_length folder offset =
     Timings.(with_section folder.timings Decode_length) @@ fun () ->
     Revbuffer.read folder.buf offset @@ fun buf i0 ->
@@ -118,6 +116,8 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
     let length_length = !pos_ref - ilength in
     (Hash.hash_size + 1 + length_length + suffix_length, 0)
 
+  (** Reset [folder.buf] and load the entry at [left_offset] without knowing its
+      length in advance. *)
   let blindfolded_load_entry_in_buf folder left_offset =
     let guessed_length =
       max_bytes_needed_to_discover_length + expected_entry_size
@@ -135,17 +135,18 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
     let actual_page_range = IO.page_range_of_offset_length left_offset length in
     if actual_page_range.last > guessed_page_range.last then (
       incr folder.stats.blindfolded_not_enough;
-      (* We missed loading enough. Let's start again without reusing what was
-         just loaded. *)
+      (* We are very unlucky. We missed loading enough at the first read. Let's
+         start again without reusing stuff from the first read (it is easier). *)
       let page_range_right_offset =
         IO.right_offset_of_page_idx folder.io actual_page_range.last
       in
       Revbuffer.reset folder.buf page_range_right_offset;
       IO.load_pages folder.io actual_page_range (Revbuffer.ingest folder.buf))
     else if actual_page_range.last < guessed_page_range.last then
-      (* Loaded too much *)
+      (* We are a bit unlucky. We loaded too much. *)
       incr folder.stats.blindfolded_too_much
-    else (* Loaded just what was needed *)
+    else
+      (* We are lucky. We loaded just what was needed. *)
       incr folder.stats.blindfolded_perfect
 
   let ensure_entry_is_in_buf folder left_offset =
@@ -157,22 +158,25 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
         blindfolded_load_entry_in_buf folder left_offset
     | Some first_loaded_offset ->
         let first_loaded_page_idx = IO.page_idx_of_offset first_loaded_offset in
-        if left_page_idx > first_loaded_page_idx then
-          (* We would have already loaded pages lower than page_range *)
-          assert false
+        if left_page_idx > first_loaded_page_idx then assert false
         else if left_page_idx = first_loaded_page_idx then
           (* 2 - We have already loaded all the needed pages *)
           incr folder.stats.hit
         else if left_page_idx = first_loaded_page_idx - 1 then (
           (* 3 - The beginning of the entry is in the next page on the left. We
-             don't know if it is totally contained in that left page or if it also
-             spans on [first_loaded_page_idx]. It doesn't matter, we can deal with
-             both cases the same way. *)
+             don't know if it is totally contained in that left page or if it
+             also spans on [first_loaded_page_idx]. It doesn't matter, we can
+             deal with both cases the same way.
+
+             If [folder.buf] is almost full, it will either trigger a soft blit
+             if we are not currently reading a very long chunk or a hard blit
+             (calling [on_chunk] in the process). *)
           incr folder.stats.was_previous;
           IO.load_page folder.io left_page_idx (Revbuffer.ingest folder.buf))
         else
-          (* 4 - If the entry spans on 3 pages, we might have a suffix of it in
-             buffer, nerver mind, let's discard everything in the buffer. *)
+          (* 4 - If the entry spans on 3 pages, we might already have a suffix
+             of it in buffer, nerver mind, let's discard everything in the
+             buffer. *)
           blindfolded_load_entry_in_buf folder left_offset
 
   let decode_entry folder offset length =
@@ -182,9 +186,15 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
     let imagic = i0 + Hash.hash_size in
     let kind = Kind.of_magic_exn buf.[imagic] in
     match kind with
-    | Inode_v1_unstable | Inode_v1_stable | Commit_v1 | Commit_v2 ->
+    | Inode_v1_unstable | Inode_v1_stable | Commit_v1 ->
+        (* TODO: Handle v1 entries *)
         Fmt.failwith "unhandled %a" pp_kind kind
-    | Contents -> (`Contents, length)
+    | Commit_v2 ->
+        (* TODO: decode commit v2 *)
+        Fmt.failwith "unhandled %a" pp_kind kind
+    | Contents ->
+        (* TODO: decode blobs with timings *)
+        (`Contents, length)
     | Inode_v2_root | Inode_v2_nonroot ->
         let v =
           Timings.(with_section folder.timings Decode_inode) @@ fun () ->
@@ -214,7 +224,7 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
       let v = decode_entry folder offset length in
       let entry = { offset; length; v; payload } in
       let acc, predecessors =
-        Timings.(with_section folder.timings Callback) @@ fun () ->
+        Timings.(with_section folder.timings Callbacks) @@ fun () ->
         f !(folder.acc) entry
       in
       folder.acc := acc;
@@ -230,7 +240,6 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
       folder.stats.peak_pq := max !(folder.stats.peak_pq) (Pq.length folder.pq);
       traverse folder f
 
-  (* TODO: why [tot_chunk_algo - tot_chunk] is not [hard_blit] *)
   let fold :
       string ->
       'pl predecessors ->
@@ -252,7 +261,7 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
 
     let acc = ref acc in
     let on_chunk (c : Revbuffer.chunk) =
-      Timings.(with_section timings Callback) @@ fun () ->
+      Timings.(with_section timings Callbacks) @@ fun () ->
       acc := on_chunk !acc c
     in
 
