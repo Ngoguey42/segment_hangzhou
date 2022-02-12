@@ -23,6 +23,7 @@
    missing infos:
    - which area references which area? (i.e. analysis of pq when changing area)
    - intersection between trees
+   - breakdown of everything in a pack file
 
    to show:
    - (leftward horizontal histogram?) averaged on all ref commits
@@ -52,21 +53,79 @@ module Intset = Set.Make (struct
   let compare = compare
 end)
 
-type acc = { dict : Dict.t; entry_count : int; area_of_offset : int63 -> int }
+module Int63map = Map.Make (Int63)
+
+type kind =
+  [ `Contents_0_31
+  | `Contents_128_511
+  | `Contents_32_127
+  | `Contents_512_plus
+  | `Inode_nonroot_tree
+  | `Inode_nonroot_values
+  | `Inode_root_tree
+  | `Inode_root_values ]
+[@@deriving repr ~pp]
+
+type k0 = {
+  parent_cycle_start : int;
+  entry_area : int;
+  path_prefix_rev : string list;
+  kind : kind;
+}
+[@@deriving repr ~pp]
+
+type v0 = { count : int; bytes : int } [@@deriving repr ~pp]
+
+type acc = {
+  dict : Dict.t;
+  entry_count : int;
+  area_of_offset : int63 -> int;
+  d0 : (k0, v0) Hashtbl.t;
+}
+
 type p = { truncated_path_rev : string list; ancestor_cycle_starts : Intset.t }
 
-let lol = Hashtbl.create 100
+let kind_of_entry (entry : _ Traverse.entry) =
+  match entry.v with
+  | `Contents ->
+      if entry.length <= 31 then `Contents_0_31
+      else if entry.length <= 127 then `Contents_32_127
+      else if entry.length <= 511 then `Contents_128_511
+      else `Contents_512_plus
+  | `Inode t -> (
+      match t.tv with
+      | Traverse.Inode.Compress.V0_stable _ | V0_unstable _ -> assert false
+      | V1_root { v = Values _; _ } -> `Inode_root_values
+      | V1_root { v = Tree _; _ } -> `Inode_root_tree
+      | V1_nonroot { v = Values _; _ } -> `Inode_nonroot_values
+      | V1_nonroot { v = Tree _; _ } -> `Inode_nonroot_tree)
 
 let on_entry acc (entry : _ Traverse.entry) =
-  if acc.entry_count mod 50_000 = 0 then
-    Fmt.epr "on_entry: %#d\n%!" acc.entry_count;
-
+  let kind = kind_of_entry entry in
+  let area = acc.area_of_offset entry.offset in
   let ancestor_cycle_starts = entry.payload.ancestor_cycle_starts in
   let prefix = entry.payload.truncated_path_rev in
+  Intset.iter
+    (fun parent_cycle_start ->
+      let entry_area = area in
+      let path_prefix_rev = prefix in
+      let kind = kind in
+      let k0 = { parent_cycle_start; entry_area; path_prefix_rev; kind } in
+      match Hashtbl.find_opt acc.d0 k0 with
+      | None -> Hashtbl.add acc.d0 k0 { count = 1; bytes = entry.length }
+      | Some { count; bytes } ->
+          Hashtbl.replace acc.d0 k0
+            { count = count + 1; bytes = bytes + entry.length })
+    entry.payload.ancestor_cycle_starts;
+
+  if acc.entry_count mod 50_000 = 0 then
+    Fmt.epr "on_entry: %#d, area:%d, kind:%a, prefix:/%s\n%!" acc.entry_count
+      area pp_kind kind
+      (prefix |> List.rev |> String.concat "/");
+
   (* if not @@ Hashtbl.mem lol prefix then (
    *   Fmt.epr "/%s \n%!" (prefix |> List.rev |> String.concat "/");
    *   Hashtbl.add lol prefix ()); *)
-
   let prefix_full = List.length prefix >= 2 in
   let preds =
     match entry.v with
@@ -85,7 +144,6 @@ let on_entry acc (entry : _ Traverse.entry) =
                (off, payload))
   in
 
-  (* let preds = List.map (fun off -> (off, entry.payload)) preds in *)
   ({ acc with entry_count = acc.entry_count + 1 }, preds)
 
 let on_chunk acc (chunk : Revbuffer.chunk) =
@@ -120,13 +178,20 @@ let main () =
     List.map (fun ((c : Cycle_start.t), off) -> (off, c.cycle_idx)) cycle_starts
   in
 
-  let area_of_offset _ = 42 in
-
-  let acc0 = { dict; entry_count = 0; area_of_offset } in
+  let area_boundaries = max_offsets |> List.to_seq |> Int63map.of_seq in
+  let area_of_offset off =
+    let _, closest_cycle_start_on_the_right =
+      Int63map.find_first (fun off' -> Int63.(off' >= off)) area_boundaries
+    in
+    closest_cycle_start_on_the_right - 1
+  in
+  let d0 = Hashtbl.create 1_000_000 in
+  let acc0 = { dict; entry_count = 0; area_of_offset; d0 } in
 
   let max_offsets =
     List.map
       (fun (off, cycle_idx) ->
+        assert (area_of_offset off = cycle_idx - 1);
         ( off,
           {
             truncated_path_rev = [];
@@ -140,6 +205,19 @@ let main () =
     Traverse.fold path max_offsets ~merge_payloads ~on_entry ~on_chunk ~on_read
       acc0
   in
+
+  Fmt.epr "d0 len: %d\n%!" (Hashtbl.length acc.d0);
+  let l =
+    Hashtbl.to_seq acc.d0
+    |> List.of_seq
+    |> List.sort (fun (_, { bytes; _ }) (_, { bytes = bytes'; _ }) ->
+           compare bytes' bytes)
+    (* |> List.sort (fun (_, { count; _ }) (_, { count = count'; _ }) ->
+     *        compare count' count) *)
+  in
+  List.iteri
+    (fun i (k, v) -> if i < 25 then Fmt.epr "%a %a\n%!" pp_k0 k pp_v0 v)
+    l;
 
   Fmt.epr "Bye World\n%!";
   Lwt.return_unit
