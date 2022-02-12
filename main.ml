@@ -58,16 +58,6 @@ module Key = struct
   include Irmin_pack.Pack_key.Make (Hash)
 
   type t = Store.node_key [@@deriving repr]
-
-  let offset t =
-    match inspect t with
-    | Direct { offset; _ } -> offset
-    | Indexed _ -> failwith "Trying to get offset from indexed key"
-
-  let length t =
-    match inspect t with
-    | Direct { length; _ } -> length
-    | Indexed _ -> failwith "Trying to get length from indexed key"
 end
 
 let loc =
@@ -80,30 +70,13 @@ let path =
   match loc with
   | `Home ->
       "/home/nico/r/irmin/_artefacts/1f1548b9-b7d2-433b-b199-ef376b567951/store"
-      (* "/home/nico/r/irmin/_artefacts/050a1e79-be77-45e5-a833-b963a3aad2d8/store" *)
-      (* "/home/nico/r/irmin/_artefacts/45994b5d-94ed-4143-b0e5-3ba28f6f7a8e/store" *)
-      (* "/mnt/y/tz/replay/none_a/store" *)
-      (* "/home/nico/r/irmin/_artefacts/99e9b48e-4a9d-48d7-b9c3-4658104e4d48/store" *)
-      (* "/home/nico/tz/hangzu_plus2_1916931_BLu79NTncAFXHiwoHDwir4BDjh2Bdc7jgL71QYGkjv2c2oD8FwZ/store_imported/context" *)
   | `Com ->
       "/home/ngoguey/bench/ro/hangzu_plus2_1916931_BLu79NTncAFXHiwoHDwir4BDjh2Bdc7jgL71QYGkjv2c2oD8FwZ/store_post_node_run/context/"
-
-(* let root_hash =
- *   match loc with
- *   | `Home ->
- *       (\* https://tzkt.io/1916931 *\)
- *       (\* CYCLE & POSITION 428 (2 of 8192) *\)
- *       "CoV6QV47kn2oRnTihfjAC3dKPfrjEZjojMXVEYBLPYM7EmFkDqdS"
- *   | `Com ->
- *       (\* https://tzkt.io/2056193 *\)
- *       (\* CYCLE & POSITION 445 (0 of 8192) *\)
- *       "CoWMUSFj7gp4LngpAhaZa62xPYZcKWMyr4Wnh14CcyyQWsPrghLx" *)
 
 let hash_of_string =
   let f = Repr.of_string Irmin_tezos.Schema.Hash.t in
   fun x -> match f x with Error (`Msg x) -> failwith x | Ok v -> v
 
-(* let root_hash = hash_of_string root_hash *)
 let hash_to_bin_string = Repr.to_bin_string hash_t |> Repr.unstage
 
 type uint8_array =
@@ -111,7 +84,6 @@ type uint8_array =
 
 let uint8_array_t = Repr.map Repr.unit (fun _ -> assert false) (fun _ -> ())
 
-(* TODO: maybe shift some of these stats to traverse et al? *)
 type acc = {
   entry_count : int;
   tot_length : int;
@@ -153,9 +125,8 @@ let preds_of_inode v =
       List.map (fun (e : ptr) -> offset_of_address e.hash) entries
 
 let on_entry acc (entry : _ Traverse.entry) =
-  if acc.entry_count mod 1_500_000 = 0 then
-    Fmt.epr "on_entry: %#d\n%!" acc.entry_count;
-
+  (* if acc.entry_count mod 1_500_000 = 0 then *)
+  (* Fmt.epr "on_entry: %#d\n%!" acc.entry_count; *)
   let preds =
     match entry.v with `Contents -> [] | `Inode t -> preds_of_inode t
   in
@@ -259,7 +230,7 @@ let root_node_offset_of_commit commit =
   in
   offset
 
-let lookup_cycles_in_repo repo =
+let lookup_cycle_starts_in_repo repo =
   let+ l =
     Lwt_list.fold_left_s
       (fun acc (cycle : Cycle_start.t) ->
@@ -351,11 +322,11 @@ let main () =
 
   let conf = Irmin_pack.config ~fresh:false ~readonly:true path in
   let* repo = Store.Repo.v conf in
-  let* cycles = lookup_cycles_in_repo repo in
-  Fmt.epr "pack-store contains %d cycles\n%!" (List.length cycles);
+  let* cycle_starts = lookup_cycle_starts_in_repo repo in
+  Fmt.epr "pack-store contains %d cycle starts\n%!" (List.length cycle_starts);
 
   (* let cycles = List.rev cycles in *)
-  let cycles = [ List.nth cycles 6 ] in
+  (* let cycles = [ List.nth cycles 6 ] in *)
   List.iter
     (fun (cycle, offset) ->
       Fmt.epr "pack store contains %a at offset %#14d\n%!" Cycle_start.pp cycle
@@ -389,7 +360,7 @@ let main () =
       Fmt.epr "\n%!";
       (* if true then failwith "super"; *)
       Fmt.epr "\n%!")
-    cycles;
+    cycle_starts;
 
   Fmt.epr "Bye World\n%!";
   Lwt.return_unit
