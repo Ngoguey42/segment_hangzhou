@@ -137,12 +137,12 @@ let left_offset t = Int63.sub_distance t.right_offset t.occupied
   [@@inline always]
 
 let emit_chunk emission_reason t c =
-  let dist_from_left = Int63.distance ~lo:(left_offset t) ~hi:c.left in
+  let dist_from_left = Int63.distance_exn ~lo:(left_offset t) ~hi:c.left in
   t.on_chunk
     {
       buf = Bytes.unsafe_to_string t.buf;
       i = capacity t - t.occupied + dist_from_left;
-      length = Int63.distance ~lo:c.left ~hi:c.right;
+      length = Int63.distance_exn ~lo:c.left ~hi:c.right;
       offset = c.left;
       emission_reason;
     }
@@ -197,8 +197,8 @@ let blit t missing_bytes byte_count =
       t.occupied <- 0
   | Some c ->
       (* 2. Try to blit by preserving [c] in buf *)
-      let unfreeable_bytes = Int63.distance ~lo:(left_offset t) ~hi:c.right in
-      let freeable_bytes = Int63.distance ~lo:c.right ~hi:t.right_offset in
+      let unfreeable_bytes = Int63.distance_exn ~lo:(left_offset t) ~hi:c.right in
+      let freeable_bytes = Int63.distance_exn ~lo:c.right ~hi:t.right_offset in
       assert (freeable_bytes >= 0);
       assert (unfreeable_bytes >= 0);
       assert (freeable_bytes + unfreeable_bytes = t.occupied);
@@ -208,8 +208,8 @@ let blit t missing_bytes byte_count =
         perform_blit t unfreeable_bytes c.right)
       else
         (* 3. Try to blit by ejecting [c] from buf *)
-        let unfreeable_bytes = Int63.distance ~lo:(left_offset t) ~hi:c.left in
-        let freeable_bytes = Int63.distance ~lo:c.left ~hi:t.right_offset in
+        let unfreeable_bytes = Int63.distance_exn ~lo:(left_offset t) ~hi:c.left in
+        let freeable_bytes = Int63.distance_exn ~lo:c.left ~hi:t.right_offset in
         assert (freeable_bytes >= 0);
         assert (unfreeable_bytes >= 0);
         assert (freeable_bytes + unfreeable_bytes = t.occupied);
@@ -277,7 +277,7 @@ let read : t -> int63 -> (string -> int -> 'a * int) -> 'a =
       (match t.current_chunk with None -> -1 | Some c -> Int63.to_int c.right)
       (Int63.to_int t.right_offset)
       (Int63.to_int offset);
-  let dist_from_left = Int63.distance ~lo:(left_offset t) ~hi:offset in
+  let dist_from_left = Int63.distance_exn ~lo:(left_offset t) ~hi:offset in
   let i = capacity t - t.occupied + dist_from_left in
   let res, bytes_read = f (Bytes.unsafe_to_string t.buf) i in
   if bytes_read < 0 then assert false

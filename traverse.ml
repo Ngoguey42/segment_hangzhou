@@ -113,17 +113,26 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
     let length = decode_entry_length folder left_offset in
     let actual_page_range = IO.page_range_of_offset_length left_offset length in
     if actual_page_range.last > guessed_page_range.last then (
-      incr folder.stats.blindfolded_not_enough;
       (* We are very unlucky. We missed loading enough at the first read. Let's
          start again without reusing stuff from the first read (it is easier). *)
+      incr folder.stats.blindfolded_not_enough;
+      folder.stats.wasted_pages :=
+        !(folder.stats.wasted_pages)
+        + Int.distance_exn ~hi:guessed_page_range.last
+            ~lo:guessed_page_range.first
+        + 1;
       let page_range_right_offset =
         IO.right_offset_of_page_idx folder.io actual_page_range.last
       in
       Revbuffer.reset folder.buf page_range_right_offset;
       IO.load_pages folder.io actual_page_range (Revbuffer.ingest folder.buf))
-    else if actual_page_range.last < guessed_page_range.last then
+    else if actual_page_range.last < guessed_page_range.last then (
       (* We are a bit unlucky. We loaded too much. *)
-      incr folder.stats.blindfolded_too_much
+      incr folder.stats.blindfolded_too_much;
+      folder.stats.wasted_pages :=
+        !(folder.stats.wasted_pages)
+        + Int.distance_exn ~hi:guessed_page_range.last
+            ~lo:actual_page_range.last)
     else
       (* We are lucky. We loaded just what was needed. *)
       incr folder.stats.blindfolded_perfect
@@ -252,7 +261,7 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
         ~right_offset:Int63.zero ~timings ~stats
     in
 
-    let io = IO.v (Filename.concat path "store.pack") timings in
+    let io = IO.v ~stats (Filename.concat path "store.pack") timings in
     stats.peak_pq := Pq.length pq;
     let folder = { acc; buf; io; pq; stats; timings; merge_payloads } in
     traverse folder f;

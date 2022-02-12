@@ -181,7 +181,7 @@ let on_chunk acc (chunk : Revbuffer.chunk) =
   let largest_algo_chunk = max acc.largest_algo_chunk chunk.length in
   let largest_chunk =
     max acc.largest_chunk
-      (Int63.distance ~lo:(fst current_chunk) ~hi:(snd current_chunk))
+      (Int63.distance_exn ~lo:(fst current_chunk) ~hi:(snd current_chunk))
   in
   let acc =
     match chunk.emission_reason with
@@ -242,6 +242,8 @@ let main () =
   let* cycles = lookup_cycles_in_repo repo in
   Fmt.epr "pack-store contains %d cycles\n%!" (List.length cycles);
 
+  let cycles = List.rev cycles in
+
   List.iter
     (fun (cycle, offset) ->
       Fmt.epr "pack store contains %a at offset %#14d\n%!" Cycle_start.pp cycle
@@ -270,6 +272,7 @@ let main () =
       Fmt.epr "%a\n%!" pp_acc acc;
       Fmt.epr "\n%!";
       Fmt.epr "\n%!";
+      if true then failwith "super"      ;
       Fmt.epr "\n%!")
     cycles;
 
