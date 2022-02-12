@@ -16,7 +16,7 @@
    - "per commit tree" x "per pack-file-area" x ()                x ()
      - # of pages touched
      - # of chunks (contiguous groups)
-   - () x                "per pack-file-area" x "per path prefix" x "per genre + commit"
+   - () x                "per pack-file-area" x ()                x "per genre + commit"
      - # of total entries (needed for leftover calculation)
      - # of total bytes used (needed for leftover calculation)
 
@@ -49,6 +49,7 @@ module Maker = Irmin_pack.Maker (Irmin_tezos.Conf)
 module Store = Maker.Make (Irmin_tezos.Schema)
 module Traverse = Traverse.Make (Irmin_tezos.Conf) (Irmin_tezos.Schema)
 open Import
+module IO = Pack_file_ios
 
 type hash = Store.hash [@@deriving repr ~pp]
 
@@ -105,6 +106,11 @@ let hash_of_string =
 (* let root_hash = hash_of_string root_hash *)
 let hash_to_bin_string = Repr.to_bin_string hash_t |> Repr.unstage
 
+type uint8_array =
+  (int, Bigarray.int8_unsigned_elt, Bigarray.c_layout) Bigarray.Array1.t
+
+let uint8_array_t = Repr.map Repr.unit (fun _ -> assert false) (fun _ -> ())
+
 (* TODO: maybe shift some of these stats to traverse et al? *)
 type acc = {
   entry_count : int;
@@ -118,6 +124,7 @@ type acc = {
   emission_reset : int;
   emission_witnessed : int;
   emission_oos : int;
+  page_seg : (uint8_array * uint8_array) option;
 }
 [@@deriving repr ~pp]
 
@@ -145,14 +152,30 @@ let preds_of_inode v =
   | Tree { entries; _ } ->
       List.map (fun (e : ptr) -> offset_of_address e.hash) entries
 
-let accumulate acc (entry : _ Traverse.entry) =
+let on_entry acc (entry : _ Traverse.entry) =
   if acc.entry_count mod 1_500_000 = 0 then
-    Fmt.epr "accumulate: %#d\n%!" acc.entry_count;
+    Fmt.epr "on_entry: %#d\n%!" acc.entry_count;
 
   let preds =
     match entry.v with `Contents -> [] | `Inode t -> preds_of_inode t
   in
   let preds = List.map (fun off -> (off, Payload)) preds in
+
+  let () =
+    let IO.{ first; last } =
+      IO.page_range_of_offset_length entry.offset entry.length
+    in
+    let needed =
+      match acc.page_seg with
+      | None -> assert false
+      | Some (_, needed) -> needed
+    in
+    for i = first to last do
+      assert (needed.{i} < 255);
+      needed.{i} <- needed.{i} + 1
+    done
+  in
+
   let acc =
     {
       acc with
@@ -200,6 +223,28 @@ let on_chunk acc (chunk : Revbuffer.chunk) =
     largest_chunk;
   }
 
+let on_read acc ({ first; last } : IO.page_range) =
+  let acc, read =
+    match acc.page_seg with
+    | None ->
+        let read =
+          Bigarray.Array1.create Bigarray.int8_unsigned Bigarray.c_layout
+            (last + 1)
+        in
+        Bigarray.Array1.fill read 0;
+        let needed =
+          Bigarray.Array1.create Bigarray.int8_unsigned Bigarray.c_layout
+            (last + 1)
+        in
+        Bigarray.Array1.fill needed 0;
+        ({ acc with page_seg = Some (read, needed) }, read)
+    | Some (read, _) -> (acc, read)
+  in
+  for i = first to last do
+    read.{i} <- read.{i} + 1
+  done;
+  acc
+
 let root_node_offset_of_commit commit =
   let k =
     match Store.Commit.tree commit |> Store.Tree.key with
@@ -234,6 +279,73 @@ let lookup_cycles_in_repo repo =
   in
   List.rev l
 
+let print_page_seg acc =
+  let read, needed = Option.get acc.page_seg in
+  let results = Hashtbl.create 5 in
+  let any_page_read = ref false in
+  for i = 0 to Bigarray.Array1.dim read - 1 do
+    let count_read = read.{i} in
+    any_page_read := !any_page_read || count_read > 0;
+    if !any_page_read then
+      let needed = needed.{i} > 0 in
+      let key = (count_read, needed) in
+      let new_count =
+        match Hashtbl.find_opt results key with
+        | None -> 1
+        | Some count -> count + 1
+      in
+      Hashtbl.replace results key new_count
+  done;
+  Fmt.epr "* In the prefix of the pack file:\n";
+  Hashtbl.iter
+    (fun (count_read, needed) occurences ->
+      let needed = if needed then "  needed  " else "not needed" in
+      Fmt.epr "  * %#10d %s pages read %d times\n" occurences needed count_read)
+    results;
+  let fold f = Hashtbl.fold f results 0 |> float_of_int in
+  let pages_read =
+    fold (fun (count_read, _needed) occ acc -> (count_read * occ) + acc)
+  in
+  let pages_needed =
+    fold (fun (_count_read, needed) occ acc ->
+        if needed then occ + acc else acc)
+  in
+  let pages_in_the_section =
+    fold (fun (_count_read, _needed) occ acc -> occ + acc)
+  in
+  let unique_pages_visited =
+    fold (fun (count_read, _needed) occ acc ->
+        if count_read > 0 then occ + acc else acc)
+  in
+  let pages_read_wasted = pages_read -. pages_needed in
+  let bytes_read = pages_read *. 4096. in
+  let bytes_needed = float_of_int acc.tot_length in
+  let bytes_wasted = bytes_read -. bytes_needed in
+  Fmt.epr
+    "A \"used\" page is a page read that is actually used to produce entries. \
+     The other pages read are the \"overhead\" ones.\n";
+  Fmt.epr
+    "A \"used\" byte is a byte read that is actually used to produce entries. \
+     The other bytes read are the \"overhead\" ones.\n";
+  Fmt.epr
+    "* %6.2f%% of the bytes read were used (most of the overhead bytes are due \
+     to the sparseness of used bytes inside used pages)\n"
+    (bytes_wasted /. bytes_read *. 100.);
+  Fmt.epr
+    "* %6.2f%% of the pages read were used (the overhead pages are caused by \
+     unlucky blindfolded reads)\n"
+    (pages_needed /. pages_read *. 100.);
+  Fmt.epr "* %6.2f%% of the bytes of the used pages were used bytes\n"
+    (bytes_needed /. (pages_needed *. 4096.) *. 100.);
+  Fmt.epr "* %6.2f%% of the overhead bytes are from overhead pages\n"
+    (pages_read_wasted *. 4096. /. bytes_wasted *. 100.);
+  Fmt.epr "* %6.2f%% of the pages are read in the prefix of the pack file\n"
+    (unique_pages_visited /. pages_in_the_section *. 100.);
+  Fmt.epr "* %6.2f%% of the pages are used in the prefix of the pack file\n"
+    (pages_needed /. pages_in_the_section *. 100.);
+
+  ()
+
 let main () =
   Fmt.epr "Hello World\n%!";
 
@@ -243,8 +355,7 @@ let main () =
   Fmt.epr "pack-store contains %d cycles\n%!" (List.length cycles);
 
   (* let cycles = List.rev cycles in *)
-  (* let cycles = [ List.nth   *)
-
+  let cycles = [ List.nth cycles 6 ] in
   List.iter
     (fun (cycle, offset) ->
       Fmt.epr "pack store contains %a at offset %#14d\n%!" Cycle_start.pp cycle
@@ -262,18 +373,21 @@ let main () =
           emission_reset = 0;
           emission_witnessed = 0;
           emission_oos = 0;
+          page_seg = None;
         }
       in
       let acc =
         Traverse.fold path
           [ (offset, Payload) ]
           (fun _off ~older:Payload ~newer:Payload -> Payload)
-          accumulate on_chunk acc0
+          on_entry on_chunk on_read acc0
       in
       Fmt.epr "%a\n%!" pp_acc acc;
+      print_page_seg acc;
+
       Fmt.epr "\n%!";
       Fmt.epr "\n%!";
-      (* if true then failwith "super"      ; *)
+      (* if true then failwith "super"; *)
       Fmt.epr "\n%!")
     cycles;
 

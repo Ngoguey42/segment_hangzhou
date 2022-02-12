@@ -201,32 +201,6 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
       (* reset buffer to trigger a last [on_chunk] *)
       Revbuffer.reset folder.buf Int63.zero;
       Fmt.epr "%a\n%!" Stats.pp s;
-      let x =
-        let tot = float_of_int !(s.pages_read) in
-        let w = float_of_int !(s.wasted_pages) in
-        (w) /. tot *. 100.
-      in
-      Fmt.epr "  in pages loaded, %.2f%% wasted\n%!" x;
-      (* let x =
-       *   let tot_read = float_of_int !(s.bytes_read) in
-       *   let tot_need = float_of_int !(s.tot_entries_bytes) in
-       *   let w = float_of_int !(s.wasted_pages) *. 4096. in
-       *   tot_need /. (tot_read -. w) *. 100.
-       * in
-       * Fmt.epr "in pages needed, %.2f%% of bytes needed\n%!" x;
-       * let x =
-       *   let tot_read = float_of_int !(s.bytes_read) in
-       *   let tot_need = float_of_int !(s.tot_entries_bytes) in
-       *   let w = float_of_int !(s.wasted_pages) *. 4096. in
-       *   w /. (tot_read -. tot_need) *. 100.
-       * in
-       * Fmt.epr "in bytes wasted, %.2f%% from pages wasted\n%!" x;
-       * let x =
-       *   let visited = !(s.max_page_loaded) - !(s.min_page_loaded) + 1 in
-       *   let needed =
-       *   (\* let  *\)
-       * in
-       * Fmt.epr "in page range visited, %.2f%% needed\n%!" x; *)
       Fmt.epr "%a\n%!" Timings.pp folder.timings)
     else
       let offset, payload =
@@ -262,9 +236,10 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
       (int63 -> older:'pl -> newer:'pl -> 'pl) ->
       ('a -> 'pl entry -> 'a * 'pl predecessors) ->
       ('a -> Revbuffer.chunk -> 'a) ->
+      ('a -> IO.page_range -> 'a) ->
       'a ->
       'a =
-   fun path max_offsets merge_payloads f on_chunk acc ->
+   fun path max_offsets merge_payloads f on_chunk on_read acc ->
     (match Conf.contents_length_header with
     | None ->
         failwith "Traverse can't work with Contents not prefixed by length"
@@ -281,6 +256,10 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
       Timings.(with_section timings Callbacks) @@ fun () ->
       acc := on_chunk !acc c
     in
+    let on_read (r : IO.page_range) =
+      Timings.(with_section timings Callbacks) @@ fun () ->
+      acc := on_read !acc r
+    in
 
     (* The choice for [right_offset] here is not important as the buffer will
        get reset for the first entry *)
@@ -289,7 +268,7 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
         ~right_offset:Int63.zero ~timings ~stats
     in
 
-    let io = IO.v ~stats (Filename.concat path "store.pack") timings in
+    let io = IO.v ~stats ~on_read (Filename.concat path "store.pack") timings in
     stats.peak_pq := Pq.length pq;
     let folder = { acc; buf; io; pq; stats; timings; merge_payloads } in
     traverse folder f;
