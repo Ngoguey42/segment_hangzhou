@@ -66,31 +66,56 @@ type kind =
   | `Inode_root_values ]
 [@@deriving repr ~pp]
 
-type k0 = {
-  parent_cycle_start : int;
-  entry_area : int;
-  path_prefix_rev : string list;
-  kind : kind;
-}
-[@@deriving repr ~pp]
+let multiple = [ "multiple" ]
 
-type v0 = { count : int; bytes : int } [@@deriving repr ~pp]
+let pp_path_prefix_rev ppf l =
+  if l === multiple then Format.fprintf ppf "%s" "multiple"
+  else Format.fprintf ppf "/%s" (l |> List.rev |> String.concat "/")
+
+module D0 = struct
+  type k = {
+    parent_cycle_start : int;
+    entry_area : int;
+    path_prefix_rev : string list;
+    kind : kind;
+  }
+  [@@deriving repr ~pp]
+
+  type v = { count : int; bytes : int } [@@deriving repr ~pp]
+
+  let save path tbl =
+    let chan = open_out path in
+    output_string chan
+      "parent_cycle_start,entry_area,path_prefix,kind,count,bytes\n";
+    Hashtbl.iter
+      (fun k v ->
+        Fmt.str "%d,%d,%a,%a,%d,%d\n" k.parent_cycle_start k.entry_area
+          pp_path_prefix_rev k.path_prefix_rev pp_kind k.kind v.count v.bytes
+        |> output_string chan)
+      tbl;
+    close_out chan
+end
 
 type acc = {
   dict : Dict.t;
   entry_count : int;
   area_of_offset : int63 -> int;
-  d0 : (k0, v0) Hashtbl.t;
+  d0 : (D0.k, D0.v) Hashtbl.t;
+  path_sharing : (string list, string list) Hashtbl.t;
 }
 
 type p = { truncated_path_rev : string list; ancestor_cycle_starts : Intset.t }
 
+let blob_encoding_prefix_size = 32 + 1
+
 let kind_of_entry (entry : _ Traverse.entry) =
   match entry.v with
   | `Contents ->
-      if entry.length <= 31 then `Contents_0_31
-      else if entry.length <= 127 then `Contents_32_127
-      else if entry.length <= 511 then `Contents_128_511
+      let len = entry.length - blob_encoding_prefix_size in
+      assert (len >= 0);
+      if len <= 31 then `Contents_0_31
+      else if len <= 127 then `Contents_32_127
+      else if len <= 511 then `Contents_128_511
       else `Contents_512_plus
   | `Inode t -> (
       match t.tv with
@@ -107,6 +132,7 @@ let on_entry acc (entry : _ Traverse.entry) =
   let prefix = entry.payload.truncated_path_rev in
   Intset.iter
     (fun parent_cycle_start ->
+      let open D0 in
       let entry_area = area in
       let path_prefix_rev = prefix in
       let kind = kind in
@@ -119,14 +145,13 @@ let on_entry acc (entry : _ Traverse.entry) =
     entry.payload.ancestor_cycle_starts;
 
   if acc.entry_count mod 50_000 = 0 then
-    Fmt.epr "on_entry: %#d, area:%d, kind:%a, prefix:/%s\n%!" acc.entry_count
-      area pp_kind kind
-      (prefix |> List.rev |> String.concat "/");
+    Fmt.epr "on_entry: %#d, area:%d, kind:%a, prefix:%a\n%!" acc.entry_count
+      area pp_kind kind pp_path_prefix_rev prefix;
 
   (* if not @@ Hashtbl.mem lol prefix then (
    *   Fmt.epr "/%s \n%!" (prefix |> List.rev |> String.concat "/");
    *   Hashtbl.add lol prefix ()); *)
-  let prefix_full = List.length prefix >= 2 in
+  let extend_prefix = List.length prefix <= 1 && prefix <<>> multiple in
   let preds =
     match entry.v with
     | `Contents -> []
@@ -134,12 +159,19 @@ let on_entry acc (entry : _ Traverse.entry) =
         preds_of_inode acc.dict t
         |> List.map (fun (step_opt, off) ->
                let truncated_path_rev =
-                 if prefix_full then prefix
+                 if not extend_prefix then prefix
                  else
                    match step_opt with
                    | None -> prefix
-                   | Some step -> step :: prefix
+                   | Some step -> (
+                       let path = step :: prefix in
+                       match Hashtbl.find_opt acc.path_sharing path with
+                       | Some path -> path
+                       | None ->
+                           Hashtbl.add acc.path_sharing path path;
+                           path)
                in
+
                let payload = { truncated_path_rev; ancestor_cycle_starts } in
                (off, payload))
   in
@@ -158,7 +190,7 @@ let merge_payloads _off
     ~older:{ truncated_path_rev = l; ancestor_cycle_starts = s }
     ~newer:{ truncated_path_rev = l'; ancestor_cycle_starts = s' } =
   let truncated_path_rev =
-    if l == l' then l else if l === l' then l else []
+    if l == l' then l else if l === l' then l else multiple
     (* Fmt.failwith "Which path to choose? /%s /%s" ( l |> List.rev |> String.concat "/") *)
     (* ( l' |> List.rev |> String.concat "/") *)
   in
@@ -186,7 +218,8 @@ let main () =
     closest_cycle_start_on_the_right - 1
   in
   let d0 = Hashtbl.create 1_000_000 in
-  let acc0 = { dict; entry_count = 0; area_of_offset; d0 } in
+  let path_sharing = Hashtbl.create 100 in
+  let acc0 = { dict; entry_count = 0; area_of_offset; d0; path_sharing } in
 
   let max_offsets =
     List.map
@@ -206,19 +239,20 @@ let main () =
       acc0
   in
 
-  Fmt.epr "d0 len: %d\n%!" (Hashtbl.length acc.d0);
-  let l =
-    Hashtbl.to_seq acc.d0
-    |> List.of_seq
-    |> List.sort (fun (_, { bytes; _ }) (_, { bytes = bytes'; _ }) ->
-           compare bytes' bytes)
-    (* |> List.sort (fun (_, { count; _ }) (_, { count = count'; _ }) ->
-     *        compare count' count) *)
+  let () =
+    let open D0 in
+    Fmt.epr "d0 len: %d\n%!" (Hashtbl.length acc.d0);
+    let l =
+      Hashtbl.to_seq acc.d0
+      |> List.of_seq
+      |> List.sort (fun (_, { bytes; _ }) (_, { bytes = bytes'; _ }) ->
+             compare bytes' bytes)
+    in
+    List.iteri
+      (fun i (k, v) -> if i < 15 then Fmt.epr "%a %a\n%!" pp_k k pp_v v)
+      l
   in
-  List.iteri
-    (fun i (k, v) -> if i < 25 then Fmt.epr "%a %a\n%!" pp_k0 k pp_v0 v)
-    l;
-
+  D0.save "d0.csv" acc.d0;
   Fmt.epr "Bye World\n%!";
   Lwt.return_unit
 
