@@ -33,6 +33,18 @@ module Pq = Priority_queue.Make (struct
   let compare = Int63.compare
 end)
 
+(* TODO: Reuse the one from pack_store *)
+module Varint = struct
+  type t = int [@@deriving repr ~decode_bin]
+
+  let min_encoded_size = 1
+
+  (** LEB128 stores 7 bits per byte. An OCaml [int] has at most 63 bits.
+      [63 / 7] equals [9]. *)
+  let max_encoded_size = 9
+end
+
+(* TODO: Change the params so that it can be instanciated from ext or pack_store *)
 module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
   module Maker = Irmin_pack.Maker (Conf)
   module Store = Maker.Make (Schema)
@@ -50,8 +62,7 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
     type compress = Compress.t [@@deriving repr ~decode_bin]
   end
 
-  type ('acc, 'pl) folder = {
-    acc : 'acc ref;
+  type 'pl folder = {
     pq : 'pl Pq.t;
     buf : Revbuffer.t;
     io : IO.t;
@@ -66,16 +77,6 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
     v : [ `Contents | `Inode of Inode.compress ];
     payload : 'pl;
   }
-
-  module Varint = struct
-    type t = int [@@deriving repr ~decode_bin]
-
-    let min_encoded_size = 1
-
-    (** LEB128 stores 7 bits per byte. An OCaml [int] has at most 63 bits.
-        [63 / 7] equals [9]. *)
-    let max_encoded_size = 9
-  end
 
   let min_bytes_needed_to_discover_length =
     Hash.hash_size + 1 + Varint.min_encoded_size
@@ -96,7 +97,10 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
     (Hash.hash_size + 1 + length_length + suffix_length, 0)
 
   (** Reset [folder.buf] and load the entry at [left_offset] without knowing its
-      length in advance. *)
+      length in advance.
+
+      Doing this with v2 entries is pretty easy as the length is stored in the
+      beginning of the entry. *)
   let blindfolded_load_entry_in_buf folder left_offset =
     let guessed_length =
       max_bytes_needed_to_discover_length + expected_entry_size
@@ -114,25 +118,16 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
     let actual_page_range = IO.page_range_of_offset_length left_offset length in
     if actual_page_range.last > guessed_page_range.last then (
       (* We are very unlucky. We missed loading enough at the first read. Let's
-         start again without reusing stuff from the first read (it is easier). *)
+         start over without reusing stuff from the first read (it is easier). *)
       incr folder.stats.blindfolded_not_enough;
-      folder.stats.wasted_pages :=
-        !(folder.stats.wasted_pages)
-        + Int.distance_exn ~hi:guessed_page_range.last
-            ~lo:guessed_page_range.first
-        + 1;
       let page_range_right_offset =
         IO.right_offset_of_page_idx folder.io actual_page_range.last
       in
       Revbuffer.reset folder.buf page_range_right_offset;
       IO.load_pages folder.io actual_page_range (Revbuffer.ingest folder.buf))
-    else if actual_page_range.last < guessed_page_range.last then (
+    else if actual_page_range.last < guessed_page_range.last then
       (* We are a bit unlucky. We loaded too much. *)
-      incr folder.stats.blindfolded_too_much;
-      folder.stats.wasted_pages :=
-        !(folder.stats.wasted_pages)
-        + Int.distance_exn ~hi:guessed_page_range.last
-            ~lo:actual_page_range.last)
+      incr folder.stats.blindfolded_too_much
     else
       (* We are lucky. We loaded just what was needed. *)
       incr folder.stats.blindfolded_perfect
@@ -181,7 +176,8 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
         (* TODO: decode commit v2 *)
         Fmt.failwith "unhandled %a" pp_kind kind
     | Contents ->
-        (* TODO: decode blobs with timings *)
+        (* TODO: decode blobs with timings, only if user wishes to
+           (use GADT conf) *)
         (`Contents, length)
     | Inode_v2_root | Inode_v2_nonroot ->
         let v =
@@ -195,12 +191,13 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
       | None -> newer
       | Some older -> merge_payloads off ~older ~newer)
 
-  let rec traverse folder f =
+  let rec traverse folder on_entry =
     if Pq.is_empty folder.pq then (
-      let s = folder.stats in
       (* reset buffer to trigger a last [on_chunk] *)
       Revbuffer.reset folder.buf Int63.zero;
-      Fmt.epr "%a\n%!" Stats.pp s;
+
+      (* TODO: Use log debug *)
+      Fmt.epr "%a\n%!" Stats.pp folder.stats;
       Fmt.epr "%a\n%!" Timings.pp folder.timings)
     else
       let offset, payload =
@@ -209,15 +206,9 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
       in
       ensure_entry_is_in_buf folder offset;
       let length = decode_entry_length folder offset in
-      folder.stats.tot_entries_bytes :=
-        !(folder.stats.tot_entries_bytes) + length;
       let v = decode_entry folder offset length in
       let entry = { offset; length; v; payload } in
-      let acc, predecessors =
-        Timings.(with_section folder.timings Callbacks) @@ fun () ->
-        f !(folder.acc) entry
-      in
-      folder.acc := acc;
+      let preds = on_entry entry in
       let () =
         Timings.(with_section folder.timings Priority_queue) @@ fun () ->
         List.iter
@@ -225,21 +216,23 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
             if Int63.(off >= offset) then
               failwith "Precedessors should be to the left of their parent";
             push_entry folder.pq folder.merge_payloads off payload)
-          predecessors
+          preds
       in
       folder.stats.peak_pq := max !(folder.stats.peak_pq) (Pq.length folder.pq);
-      traverse folder f
+      traverse folder on_entry
 
+  (* TODO: A clean mli with re-exported types from sub files *)
   let fold :
       string ->
       'pl predecessors ->
-      (int63 -> older:'pl -> newer:'pl -> 'pl) ->
-      ('a -> 'pl entry -> 'a * 'pl predecessors) ->
-      ('a -> Revbuffer.chunk -> 'a) ->
-      ('a -> IO.page_range -> 'a) ->
+      merge_payloads:(int63 -> older:'pl -> newer:'pl -> 'pl) ->
+      on_entry:('a -> 'pl entry -> 'a * 'pl predecessors) ->
+      on_chunk:('a -> Revbuffer.chunk -> 'a) ->
+      on_read:('a -> IO.page_range -> 'a) ->
       'a ->
       'a =
-   fun path max_offsets merge_payloads f on_chunk on_read acc ->
+   fun path max_offsets ~merge_payloads ~on_entry ~on_chunk ~on_read acc ->
+    (* TODO: Change [path] to [io] *)
     (match Conf.contents_length_header with
     | None ->
         failwith "Traverse can't work with Contents not prefixed by length"
@@ -247,19 +240,26 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
     let timings = Timings.(v Overhead) in
     let stats = Stats.v () in
 
+    let acc = ref acc in
+    let on_chunk (x : Revbuffer.chunk) =
+      Timings.(with_section timings Callbacks) @@ fun () ->
+      acc := on_chunk !acc x
+    in
+    let on_entry (x : 'pl entry) =
+      Timings.(with_section timings Callbacks) @@ fun () ->
+      let acc', preds = on_entry !acc x in
+      acc := acc';
+      preds
+    in
+    let on_read (x : IO.page_range) =
+      Timings.(with_section timings Callbacks) @@ fun () ->
+      acc := on_read !acc x
+    in
+
     let pq = Pq.create () in
     let push_entry = push_entry pq merge_payloads in
     List.iter (fun (off, payload) -> push_entry off payload) max_offsets;
-
-    let acc = ref acc in
-    let on_chunk (c : Revbuffer.chunk) =
-      Timings.(with_section timings Callbacks) @@ fun () ->
-      acc := on_chunk !acc c
-    in
-    let on_read (r : IO.page_range) =
-      Timings.(with_section timings Callbacks) @@ fun () ->
-      acc := on_read !acc r
-    in
+    stats.peak_pq := Pq.length pq;
 
     (* The choice for [right_offset] here is not important as the buffer will
        get reset for the first entry *)
@@ -268,9 +268,7 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
         ~right_offset:Int63.zero ~timings ~stats
     in
 
-    let io = IO.v ~stats ~on_read (Filename.concat path "store.pack") timings in
-    stats.peak_pq := Pq.length pq;
-    let folder = { acc; buf; io; pq; stats; timings; merge_payloads } in
-    traverse folder f;
-    !(folder.acc)
+    let io = IO.v ~on_read (Filename.concat path "store.pack") timings in
+    traverse { buf; io; pq; stats; timings; merge_payloads } on_entry;
+    !acc
 end

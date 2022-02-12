@@ -379,8 +379,8 @@ let main () =
       let acc =
         Traverse.fold path
           [ (offset, Payload) ]
-          (fun _off ~older:Payload ~newer:Payload -> Payload)
-          on_entry on_chunk on_read acc0
+          ~merge_payloads:(fun _off ~older:Payload ~newer:Payload -> Payload)
+          ~on_entry ~on_chunk ~on_read acc0
       in
       Fmt.epr "%a\n%!" pp_acc acc;
       print_page_seg acc;

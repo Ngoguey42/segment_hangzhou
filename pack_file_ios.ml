@@ -27,7 +27,6 @@ type t = {
   right_offset : int63;
   version : [ `V1 | `V2 ];
   timings : Timings.t;
-  stats : Stats.t;
   on_read : page_range -> unit;
 }
 (** [right_offset] is a virtual offset *)
@@ -35,20 +34,20 @@ type t = {
 module Raw = Index_unix.Private.Raw
 module Version = Irmin_pack.Version
 
-let v ~stats ~on_read path timings =
+let v ~on_read path timings =
+  (* TODO: log debug *)
   Fmt.epr "Pack_file_ios: Opening %S\n%!" path;
   if not @@ Sys.file_exists path then failwith "Pack file doesn't exist";
   let fd = Unix.openfile path Unix.[ O_EXCL; O_RDONLY; O_CLOEXEC ] 0o644 in
   let raw = Raw.v fd in
   let right_offset = Raw.Offset.get raw in
-  Fmt.epr "               right_offset: %#14d\n%!" (Int63.to_int right_offset);
   let version =
     let v_string = Raw.Version.get raw in
     match Version.of_bin v_string with
     | Some v -> v
     | None -> Version.invalid_arg v_string
   in
-  { fd; right_offset; version; timings; stats; on_read }
+  { fd; right_offset; version; timings; on_read }
 
 (** Conversions between virtual and physical offsets *)
 module Conversions = struct
@@ -138,13 +137,6 @@ let load_pages t ({ first; last } as range)
       \  left_offset:%#14d\n\
       \ right_offset:%#14d" buffer_offset (Bytes.length buffer) bytes_read
       length (Int63.to_int left_offset)
-      (Int63.to_int right_offset);
-  incr t.stats.read_count;
-  let page_count = last - first + 1 in
-  t.stats.pages_read := !(t.stats.pages_read) + page_count;
-  t.stats.bytes_read := !(t.stats.bytes_read) + length;
-  t.stats.min_page_loaded := min !(t.stats.min_page_loaded) first;
-  t.stats.max_page_loaded := max !(t.stats.max_page_loaded) last;
-  if page_count > 1 then incr t.stats.multi_pages_read
+      (Int63.to_int right_offset)
 
 let load_page t page_idx = load_pages t { first = page_idx; last = page_idx }
