@@ -4,6 +4,7 @@ module Maker = Irmin_pack.Maker (Irmin_tezos.Conf)
 module Store = Maker.Make (Irmin_tezos.Schema)
 module IO = Pack_file_ios
 module Traverse = Traverse.Make (Irmin_tezos.Conf) (Irmin_tezos.Schema)
+module Dict = Irmin_pack.Dict
 
 module Key = struct
   include Irmin_pack.Pack_key
@@ -39,7 +40,16 @@ let offset_of_address =
   | Offset x -> x
   | Hash _ -> failwith "traverse doesn't handle inode children by hash"
 
-let preds_of_inode v =
+let expand_name dict name =
+  let open Traverse.Inode.Compress in
+  match name with
+  | Direct s -> s
+  | Indirect key ->
+    match   Dict.find dict key with
+    | None -> assert false
+    | Some s -> s
+
+let preds_of_inode dict v =
   let open Traverse.Inode.Compress in
   let v =
     match v.tv with
@@ -49,11 +59,11 @@ let preds_of_inode v =
   | Values l ->
       List.map
         (function
-          | Contents (_, addr, _) -> offset_of_address addr
-          | Node (_, addr) -> offset_of_address addr)
+          | Contents (name, addr, _) -> Some (expand_name dict name), offset_of_address addr
+          | Node (name, addr) -> Some (expand_name dict name), offset_of_address addr)
         l
   | Tree { entries; _ } ->
-      List.map (fun (e : ptr) -> offset_of_address e.hash) entries
+      List.map (fun (e : ptr) -> None, offset_of_address e.hash) entries
 
 let root_node_offset_of_commit commit =
   let k =

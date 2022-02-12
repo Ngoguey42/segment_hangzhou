@@ -52,17 +52,40 @@ module Intset = Set.Make (struct
   let compare = compare
 end)
 
-type acc = { entry_count : int; area_of_offset : int63 -> int }
-type p = { ancestor_cycle_starts : Intset.t }
+type acc = { dict : Dict.t; entry_count : int; area_of_offset : int63 -> int }
+type p = { truncated_path_rev : string list; ancestor_cycle_starts : Intset.t }
+
+let lol = Hashtbl.create 100
 
 let on_entry acc (entry : _ Traverse.entry) =
   if acc.entry_count mod 50_000 = 0 then
     Fmt.epr "on_entry: %#d\n%!" acc.entry_count;
 
+  let ancestor_cycle_starts = entry.payload.ancestor_cycle_starts in
+  let prefix = entry.payload.truncated_path_rev in
+  (* if not @@ Hashtbl.mem lol prefix then (
+   *   Fmt.epr "/%s \n%!" (prefix |> List.rev |> String.concat "/");
+   *   Hashtbl.add lol prefix ()); *)
+
+  let prefix_full = List.length prefix >= 2 in
   let preds =
-    match entry.v with `Contents -> [] | `Inode t -> preds_of_inode t
+    match entry.v with
+    | `Contents -> []
+    | `Inode t ->
+        preds_of_inode acc.dict t
+        |> List.map (fun (step_opt, off) ->
+               let truncated_path_rev =
+                 if prefix_full then prefix
+                 else
+                   match step_opt with
+                   | None -> prefix
+                   | Some step -> step :: prefix
+               in
+               let payload = { truncated_path_rev; ancestor_cycle_starts } in
+               (off, payload))
   in
-  let preds = List.map (fun off -> (off, entry.payload)) preds in
+
+  (* let preds = List.map (fun off -> (off, entry.payload)) preds in *)
   ({ acc with entry_count = acc.entry_count + 1 }, preds)
 
 let on_chunk acc (chunk : Revbuffer.chunk) =
@@ -73,15 +96,23 @@ let on_read acc ({ first; last } : IO.page_range) =
   ignore (first, last);
   acc
 
-let merge_payloads _off ~older:{ ancestor_cycle_starts = s }
-    ~newer:{ ancestor_cycle_starts = s' } =
-  { ancestor_cycle_starts = Intset.union s s' }
+let merge_payloads _off
+    ~older:{ truncated_path_rev = l; ancestor_cycle_starts = s }
+    ~newer:{ truncated_path_rev = l'; ancestor_cycle_starts = s' } =
+  let truncated_path_rev =
+    if l == l' then l else if l === l' then l else []
+    (* Fmt.failwith "Which path to choose? /%s /%s" ( l |> List.rev |> String.concat "/") *)
+    (* ( l' |> List.rev |> String.concat "/") *)
+  in
+  (* TODO: truncated_path_rev     *)
+  { truncated_path_rev; ancestor_cycle_starts = Intset.union s s' }
 
 let main () =
   Fmt.epr "Hello World\n%!";
 
   let conf = Irmin_pack.config ~fresh:false ~readonly:true path in
   let* repo = Store.Repo.v conf in
+  let dict = Dict.v ~fresh:false ~readonly:true path in
   let* cycle_starts = lookup_cycle_starts_in_repo repo in
   Fmt.epr "pack-store contains %d cycle starts\n%!" (List.length cycle_starts);
 
@@ -91,13 +122,14 @@ let main () =
 
   let area_of_offset _ = 42 in
 
-  let acc0 = { entry_count = 0; area_of_offset } in
+  let acc0 = { dict; entry_count = 0; area_of_offset } in
 
   let max_offsets =
     List.map
       (fun (off, cycle_idx) ->
         ( off,
           {
+            truncated_path_rev = [];
             ancestor_cycle_starts =
               [ cycle_idx ] |> List.to_seq |> Intset.of_seq;
           } ))
