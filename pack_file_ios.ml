@@ -137,7 +137,11 @@ let load_pages t { first; last } (f : int -> (bytes -> int -> unit) -> unit) =
       length (Int63.to_int left_offset)
       (Int63.to_int right_offset);
   incr t.stats.read_count;
-  t.stats.pages_read := !(t.stats.pages_read) + last - first;
-  t.stats.bytes_read := !(t.stats.bytes_read) + length
+  let page_count = last - first + 1 in
+  t.stats.pages_read := !(t.stats.pages_read) + page_count;
+  t.stats.bytes_read := !(t.stats.bytes_read) + length;
+  t.stats.min_page_loaded := min !(t.stats.min_page_loaded) first;
+  t.stats.max_page_loaded := max !(t.stats.max_page_loaded) last;
+  if page_count > 1 then incr t.stats.multi_pages_read
 
 let load_page t page_idx = load_pages t { first = page_idx; last = page_idx }

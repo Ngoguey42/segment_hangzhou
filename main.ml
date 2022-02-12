@@ -242,7 +242,8 @@ let main () =
   let* cycles = lookup_cycles_in_repo repo in
   Fmt.epr "pack-store contains %d cycles\n%!" (List.length cycles);
 
-  let cycles = List.rev cycles in
+  (* let cycles = List.rev cycles in *)
+  (* let cycles = [ List.nth   *)
 
   List.iter
     (fun (cycle, offset) ->
@@ -272,17 +273,10 @@ let main () =
       Fmt.epr "%a\n%!" pp_acc acc;
       Fmt.epr "\n%!";
       Fmt.epr "\n%!";
-      if true then failwith "super"      ;
+      (* if true then failwith "super"      ; *)
       Fmt.epr "\n%!")
     cycles;
 
-  (* let* commit_opt = Store.Commit.of_hash repo root_hash in
-   * let commit =
-   *   match commit_opt with
-   *   | None -> failwith "Could not find root_hash in index"
-   *   | Some c -> c
-   * in
-   * let offset = root_node_offset_of_commit commit in *)
   Fmt.epr "Bye World\n%!";
   Lwt.return_unit
 

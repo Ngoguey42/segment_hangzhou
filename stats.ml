@@ -3,6 +3,7 @@ open Import
 type t = {
   peak_pq : int ref;
   wasted_pages : int ref;
+  tot_entries_bytes : int ref;
   (* Lookups in revbuffer *)
   hit : int ref;
   blindfolded_perfect : int ref;
@@ -18,6 +19,9 @@ type t = {
   read_count : int ref;
   bytes_read : int ref;
   pages_read : int ref;
+  multi_pages_read : int ref;
+  min_page_loaded : int ref;
+  max_page_loaded : int ref;
 }
 [@@deriving repr ~pp]
 
@@ -37,4 +41,8 @@ let v () =
     bytes_read = ref 0;
     pages_read = ref 0;
     wasted_pages = ref 0;
+    multi_pages_read = ref 0;
+    tot_entries_bytes = ref 0;
+    min_page_loaded = ref max_int;
+    max_page_loaded = ref (-1);
   }

@@ -197,10 +197,36 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
 
   let rec traverse folder f =
     if Pq.is_empty folder.pq then (
+      let s = folder.stats in
       (* reset buffer to trigger a last [on_chunk] *)
       Revbuffer.reset folder.buf Int63.zero;
-      Fmt.epr "%a\n%!" Stats.pp folder.stats;
-      (* Revbuffer.(Fmt.epr "%a\n%!" pp_stats folder.buf.stats); *)
+      Fmt.epr "%a\n%!" Stats.pp s;
+      let x =
+        let tot = float_of_int !(s.pages_read) in
+        let w = float_of_int !(s.wasted_pages) in
+        (w) /. tot *. 100.
+      in
+      Fmt.epr "  in pages loaded, %.2f%% wasted\n%!" x;
+      (* let x =
+       *   let tot_read = float_of_int !(s.bytes_read) in
+       *   let tot_need = float_of_int !(s.tot_entries_bytes) in
+       *   let w = float_of_int !(s.wasted_pages) *. 4096. in
+       *   tot_need /. (tot_read -. w) *. 100.
+       * in
+       * Fmt.epr "in pages needed, %.2f%% of bytes needed\n%!" x;
+       * let x =
+       *   let tot_read = float_of_int !(s.bytes_read) in
+       *   let tot_need = float_of_int !(s.tot_entries_bytes) in
+       *   let w = float_of_int !(s.wasted_pages) *. 4096. in
+       *   w /. (tot_read -. tot_need) *. 100.
+       * in
+       * Fmt.epr "in bytes wasted, %.2f%% from pages wasted\n%!" x;
+       * let x =
+       *   let visited = !(s.max_page_loaded) - !(s.min_page_loaded) + 1 in
+       *   let needed =
+       *   (\* let  *\)
+       * in
+       * Fmt.epr "in page range visited, %.2f%% needed\n%!" x; *)
       Fmt.epr "%a\n%!" Timings.pp folder.timings)
     else
       let offset, payload =
@@ -209,6 +235,8 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
       in
       ensure_entry_is_in_buf folder offset;
       let length = decode_entry_length folder offset in
+      folder.stats.tot_entries_bytes :=
+        !(folder.stats.tot_entries_bytes) + length;
       let v = decode_entry folder offset length in
       let entry = { offset; length; v; payload } in
       let acc, predecessors =
