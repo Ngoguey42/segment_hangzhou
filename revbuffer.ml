@@ -63,16 +63,19 @@
 open Import
 
 type int63 = Int63.t [@@deriving repr]
-
 type current_chunk = { left : int63; right : int63 }
+
+type emission_reason = [ `Reset | `Witnessed_discontinuity | `Out_of_space ]
+[@@deriving repr ~pp]
 
 type chunk = {
   buf : string;
   i : int;
   length : int;
   offset : int63;
-  emission_reason : [ `Reset | `Witnessed_discontinuity | `Out_of_space ];
+  emission_reason : emission_reason;
 }
+[@@deriving repr]
 (** A chunk of consecutive bytes that were read by the user. It is emited to the
     user through [on_chunk].
 
@@ -92,6 +95,14 @@ type chunk = {
     - [`Out_of_space] in case of early emission caused by an [ingest] on a full
       buffer (i.e. [Revbuffer] can't emit chunks larger than the size of [buf])
       (i.e. the hard blit case). *)
+
+let pp_chunk ppf c =
+  let right = Int63.add_distance c.offset c.length in
+  Format.fprintf ppf "i:%d, len:%d, left:%#14d, right:%#14d, reason:%a" c.i c.length
+    (Int63.to_int c.offset) (Int63.to_int right) pp_emission_reason c.emission_reason
+
+let chunk_t =
+  Repr.like chunk_t ~pp:pp_chunk
 
 type t = {
   buf : bytes;
@@ -197,7 +208,9 @@ let blit t missing_bytes byte_count =
       t.occupied <- 0
   | Some c ->
       (* 2. Try to blit by preserving [c] in buf *)
-      let unfreeable_bytes = Int63.distance_exn ~lo:(left_offset t) ~hi:c.right in
+      let unfreeable_bytes =
+        Int63.distance_exn ~lo:(left_offset t) ~hi:c.right
+      in
       let freeable_bytes = Int63.distance_exn ~lo:c.right ~hi:t.right_offset in
       assert (freeable_bytes >= 0);
       assert (unfreeable_bytes >= 0);
@@ -208,7 +221,9 @@ let blit t missing_bytes byte_count =
         perform_blit t unfreeable_bytes c.right)
       else
         (* 3. Try to blit by ejecting [c] from buf *)
-        let unfreeable_bytes = Int63.distance_exn ~lo:(left_offset t) ~hi:c.left in
+        let unfreeable_bytes =
+          Int63.distance_exn ~lo:(left_offset t) ~hi:c.left
+        in
         let freeable_bytes = Int63.distance_exn ~lo:c.left ~hi:t.right_offset in
         assert (freeable_bytes >= 0);
         assert (unfreeable_bytes >= 0);

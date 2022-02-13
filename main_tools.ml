@@ -43,11 +43,11 @@ let offset_of_address =
 let expand_name dict name =
   let open Traverse.Inode.Compress in
   match name with
-  | Direct s -> s, `Direct
-  | Indirect key ->
-    match   Dict.find dict key with
-    | None -> assert false
-    | Some s -> s, `Indirect
+  | Direct s -> (s, `Direct)
+  | Indirect key -> (
+      match Dict.find dict key with
+      | None -> assert false
+      | Some s -> (s, `Indirect))
 
 let preds_of_inode dict v =
   let open Traverse.Inode.Compress in
@@ -59,11 +59,13 @@ let preds_of_inode dict v =
   | Values l ->
       List.map
         (function
-          | Contents (name, addr, _) -> Some (expand_name dict name), offset_of_address addr
-          | Node (name, addr) -> Some (expand_name dict name), offset_of_address addr)
+          | Contents (name, addr, _) ->
+              (Some (expand_name dict name), offset_of_address addr)
+          | Node (name, addr) ->
+              (Some (expand_name dict name), offset_of_address addr))
         l
   | Tree { entries; _ } ->
-      List.map (fun (e : ptr) -> None, offset_of_address e.hash) entries
+      List.map (fun (e : ptr) -> (None, offset_of_address e.hash)) entries
 
 let root_node_offset_of_commit commit =
   let k =
@@ -88,10 +90,15 @@ let lookup_cycle_starts_in_repo repo =
         let acc =
           Option.fold ~none:acc
             ~some:(fun commit ->
-              let offset = root_node_offset_of_commit commit in
-              (* Fmt.epr "pack store contains %a at offset %#14d\n%!" Cycle_start.pp *)
-              (* cycle (Int63.to_int offset); *)
-              (cycle, offset) :: acc)
+              let commit_offset =
+                match Key.inspect (Store.Commit.key commit) with
+                | Indexed _ -> assert false
+                | Direct { offset; _ } -> offset
+              in
+              let node_offset = root_node_offset_of_commit commit in
+              assert Int63.(node_offset < commit_offset);
+              Fmt.epr "%a, node:%#14d, commit:%#14d\n%!" Cycle_start.pp cycle (Int63.to_int node_offset) (Int63.to_int commit_offset);
+              (cycle, node_offset, commit_offset) :: acc)
             commit_opt
         in
         Lwt.return acc)

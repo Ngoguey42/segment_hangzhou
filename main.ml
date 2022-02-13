@@ -133,12 +133,32 @@ module D1 = struct
     close_out chan
 end
 
+module D2 = struct
+  type k = { parent_cycle_start : int; entry_area : int }
+  type v = { pages_touched : int; chunk_count : int }
+
+  let path = "./memory_layout.csv"
+
+  let save tbl =
+    let chan = open_out path in
+    output_string chan
+      "parent_cycle_start,entry_area,pages_touched,chunk_count\n";
+    Hashtbl.iter
+      (fun k v ->
+        Fmt.str "%d,%d,%d,%d\n" k.parent_cycle_start k.entry_area
+          v.pages_touched v.chunk_count
+        |> output_string chan)
+      tbl;
+    close_out chan
+end
+
 type acc = {
   dict : Dict.t;
   entry_count : int;
   area_of_offset : int63 -> int;
   d0 : (D0.k, D0.v) Hashtbl.t;
   d1 : (D1.k, D1.v) Hashtbl.t;
+  d2 : (D2.k, D2.v) Hashtbl.t;
   path_sharing : (string list, string list) Hashtbl.t;
 }
 
@@ -249,6 +269,16 @@ let on_entry acc (entry : _ Traverse.entry) =
       ({ acc with entry_count = acc.entry_count + 1 }, preds)
 
 let on_chunk acc (chunk : Revbuffer.chunk) =
+  let left = chunk.offset in
+  let right = Int63.add_distance left chunk.length in
+  let area = acc.area_of_offset left in
+  assert (area = acc.area_of_offset Int63.(right - one));
+
+  (* let () =
+   *   let open D2 in
+   *   let k = { parent_cycle_start; entry_area = area } in
+   * in *)
+
   ignore chunk;
   acc
 
@@ -276,12 +306,15 @@ let main () =
   let* cycle_starts = lookup_cycle_starts_in_repo repo in
   Fmt.epr "pack-store contains %d cycle starts\n%!" (List.length cycle_starts);
 
-  let max_offsets =
-    List.map (fun ((c : Cycle_start.t), off) -> (off, c.cycle_idx)) cycle_starts
+  let area_boundaries =
+    cycle_starts
+    |> List.map (fun ((c : Cycle_start.t), _node_off, commit_off) ->
+           (commit_off, c.cycle_idx))
+    |> List.to_seq
+    |> Int63map.of_seq
   in
-
-  let area_boundaries = max_offsets |> List.to_seq |> Int63map.of_seq in
   let area_of_offset off =
+    (* Fmt.epr "area_of_offset: %#14d\n%!" Int63.(to_int off); *)
     let _, closest_cycle_start_on_the_right =
       Int63map.find_first (fun off' -> Int63.(off' >= off)) area_boundaries
     in
@@ -289,20 +322,21 @@ let main () =
   in
   let d0 = Hashtbl.create 1_000 in
   let d1 = Hashtbl.create 1_000 in
+  let d2 = Hashtbl.create 1_000 in
   let path_sharing = Hashtbl.create 100 in
-  let acc0 = { dict; entry_count = 0; area_of_offset; d0; d1; path_sharing } in
+  let acc0 = { dict; entry_count = 0; area_of_offset; d0; d1; d2; path_sharing } in
 
   let max_offsets =
     List.map
-      (fun (off, cycle_idx) ->
-        assert (area_of_offset off = cycle_idx - 1);
-        ( off,
+      (fun ((c : Cycle_start.t), node_off, _commit_off) ->
+        assert (area_of_offset node_off = c.cycle_idx - 1);
+        ( node_off,
           {
             truncated_path_rev = [];
             ancestor_cycle_starts =
-              [ cycle_idx ] |> List.to_seq |> Intset.of_seq;
+              [ c.cycle_idx ] |> List.to_seq |> Intset.of_seq;
           } ))
-      max_offsets
+      cycle_starts
   in
 
   let acc =
@@ -325,6 +359,7 @@ let main () =
    * in *)
   D0.save acc.d0;
   D1.save acc.d1;
+  D2.save acc.d2;
   Fmt.epr "Bye World\n%!";
   Lwt.return_unit
 
