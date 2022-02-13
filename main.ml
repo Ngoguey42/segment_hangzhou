@@ -71,6 +71,18 @@ type kind =
   | `Inode_root_values ]
 [@@deriving repr ~pp]
 
+type extended_kind =
+  [ `Contents_0_31
+  | `Contents_128_511
+  | `Contents_32_127
+  | `Contents_512_plus
+  | `Inode_nonroot_tree
+  | `Inode_nonroot_values
+  | `Inode_root_tree
+  | `Inode_root_values
+  | `Commit ]
+[@@deriving repr ~pp]
+
 let dynamic_size_of_step_encoding =
   match Irmin.Type.Size.of_value Store.step_t with
   | Dynamic f -> f
@@ -152,6 +164,26 @@ module D2 = struct
     close_out chan
 end
 
+module D3 = struct
+  type k = { area : int; kind : extended_kind }
+  type v = { entry_count : int; byte_count : int }
+
+  let path = "./areas.csv"
+
+  let save tbl =
+    let chan = open_out path in
+    output_string chan "area,kind,entry_count,byte_count\n";
+    Hashtbl.iter
+      (fun k v ->
+        Fmt.str "%d,%a,%d,%d\n" k.area pp_extended_kind k.kind v.entry_count
+          v.byte_count
+        |> output_string chan)
+      tbl;
+    close_out chan
+end
+
+(* TODO: Harmonise the field names between dicts *)
+
 type acc = {
   dict : Dict.t;
   area_of_offset : int63 -> int;
@@ -170,22 +202,39 @@ type payload = { truncated_path_rev : string list }
 
 let blob_encoding_prefix_size = 32 + 1
 
+let kind_of_contents entry_length =
+  let len = entry_length - blob_encoding_prefix_size in
+  assert (len >= 0);
+  if len <= 31 then `Contents_0_31
+  else if len <= 127 then `Contents_32_127
+  else if len <= 511 then `Contents_128_511
+  else `Contents_512_plus
+
+(* quick and dirty *)
+let kind_of_inode2 =
+  let open Seq_traverse.Inode.Compress in
+  fun t ->
+    match t.tv with
+    | V0_stable _ | V0_unstable _ -> assert false
+    | V1_root { v = Values _; _ } -> `Inode_root_values
+    | V1_root { v = Tree _; _ } -> `Inode_root_tree
+    | V1_nonroot { v = Values _; _ } -> `Inode_nonroot_values
+    | V1_nonroot { v = Tree _; _ } -> `Inode_nonroot_tree
+
+let kind_of_inode =
+  let open Traverse.Inode.Compress in
+  fun t ->
+    match t.tv with
+    | V0_stable _ | V0_unstable _ -> assert false
+    | V1_root { v = Values _; _ } -> `Inode_root_values
+    | V1_root { v = Tree _; _ } -> `Inode_root_tree
+    | V1_nonroot { v = Values _; _ } -> `Inode_nonroot_values
+    | V1_nonroot { v = Tree _; _ } -> `Inode_nonroot_tree
+
 let kind_of_entry (entry : _ Traverse.entry) =
   match entry.v with
-  | `Contents ->
-      let len = entry.length - blob_encoding_prefix_size in
-      assert (len >= 0);
-      if len <= 31 then `Contents_0_31
-      else if len <= 127 then `Contents_32_127
-      else if len <= 511 then `Contents_128_511
-      else `Contents_512_plus
-  | `Inode t -> (
-      match t.tv with
-      | Traverse.Inode.Compress.V0_stable _ | V0_unstable _ -> assert false
-      | V1_root { v = Values _; _ } -> `Inode_root_values
-      | V1_root { v = Tree _; _ } -> `Inode_root_tree
-      | V1_nonroot { v = Values _; _ } -> `Inode_nonroot_values
-      | V1_nonroot { v = Tree _; _ } -> `Inode_nonroot_tree)
+  | `Contents -> kind_of_contents entry.length
+  | `Inode t -> kind_of_inode t
 
 let register_entry acc (entry : _ Traverse.entry) entry_area path_prefix_rev
     kind parent_cycle_start =
@@ -357,15 +406,55 @@ let main () =
   let area_of_offset off =
     (* Fmt.epr "area_of_offset: %#14d\n%!" Int63.(to_int off); *)
     let _, closest_cycle_start_on_the_right =
-      Int63map.find_first (fun off' -> Int63.(off' >= off)) area_boundaries
+      Int63map.find_first (fun off' -> Int63.(off' > off)) area_boundaries
     in
     closest_cycle_start_on_the_right - 1
   in
+
+  Fmt.epr "\n%!";
+  Fmt.epr "\n%!";
+  Fmt.epr "First, traverse sequentially the file\n%!";
+  let () =
+    let d3 = Hashtbl.create 1_000 in
+    let _, _, offset_to_stop_at = cycle_starts |> List.rev |> List.hd in
+    Seq_traverse.fold path () ~on_entry:(fun () off length entry ->
+        let left = off in
+        let right = Int63.add_distance off length in
+        assert (Int63.(right <= offset_to_stop_at));
+        let area = area_of_offset left in
+        let open D3 in
+        let kind =
+          match entry with
+          | `Commit -> `Commit
+          | `Contents -> kind_of_contents length
+          | `Inode t -> kind_of_inode2 t
+        in
+        let k = { area; kind } in
+        let v =
+          match Hashtbl.find_opt d3 k with
+          | None -> { entry_count = 1; byte_count = length }
+          | Some prev ->
+              {
+                entry_count = prev.entry_count + 1;
+                byte_count = prev.byte_count + length;
+              }
+        in
+
+        Hashtbl.replace d3 k v;
+        (* if Int63.to_int off > 11_199_000 || Int63.to_int off < 100 then *)
+        (* Fmt.epr "on_entry %#14d, %d, %a, area:%d\n%!" (Int63.to_int off) length
+         *   (Repr.pp Irmin_pack.Pack_value.Kind.t)
+         *   kind area; *)
+        assert (area = area_of_offset Int63.(right - one));
+        ((), Int63.(right < offset_to_stop_at)));
+    D3.save d3
+  in
+
   let d0 = Hashtbl.create 1_000 in
   let d1 = Hashtbl.create 1_000 in
   let d2 = Hashtbl.create 1_000 in
   let path_sharing = Hashtbl.create 100 in
-  let acc0 =
+  let acc =
     {
       dict;
       area_of_offset;
@@ -379,7 +468,6 @@ let main () =
       current_chunk = None;
     }
   in
-
   let acc =
     List.fold_left
       (fun acc ((c : Cycle_start.t), node_off, _commit_off) ->
@@ -404,7 +492,7 @@ let main () =
 
         (* if true then failwith "super"; *)
         acc)
-      acc0 cycle_starts
+      acc cycle_starts
   in
 
   D0.save acc.d0;

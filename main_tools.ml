@@ -4,7 +4,9 @@ module Maker = Irmin_pack.Maker (Irmin_tezos.Conf)
 module Store = Maker.Make (Irmin_tezos.Schema)
 module IO = Pack_file_ios
 module Traverse = Traverse.Make (Irmin_tezos.Conf) (Irmin_tezos.Schema)
-module Dict = Irmin_pack.Dict
+module Seq_traverse = Sequential_traverse.Make (Irmin_tezos.Conf) (Irmin_tezos.Schema)
+
+    module Dict = Irmin_pack.Dict
 
 module Key = struct
   include Irmin_pack.Pack_key
