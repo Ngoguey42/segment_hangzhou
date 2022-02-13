@@ -144,7 +144,7 @@ let on_entry acc (entry : _ Traverse.entry) =
             { count = count + 1; bytes = bytes + entry.length })
     entry.payload.ancestor_cycle_starts;
 
-  if acc.entry_count mod 50_000 = 0 then
+  if acc.entry_count mod 500_000 = 0 then
     Fmt.epr "on_entry: %#d, area:%d, kind:%a, prefix:%a\n%!" acc.entry_count
       area pp_kind kind pp_path_prefix_rev prefix;
 
