@@ -135,18 +135,18 @@ end
 
 module D2 = struct
   type k = { parent_cycle_start : int; entry_area : int }
-  type v = { pages_touched : int; chunk_count : int }
+  type v = { pages_touched : int; chunk_count : int; algo_chunk_count : int }
 
   let path = "./memory_layout.csv"
 
   let save tbl =
     let chan = open_out path in
     output_string chan
-      "parent_cycle_start,entry_area,pages_touched,chunk_count\n";
+      "parent_cycle_start,entry_area,pages_touched,chunk_count,algo_chunk_count\n";
     Hashtbl.iter
       (fun k v ->
-        Fmt.str "%d,%d,%d,%d\n" k.parent_cycle_start k.entry_area
-          v.pages_touched v.chunk_count
+        Fmt.str "%d,%d,%d,%d,%d\n" k.parent_cycle_start k.entry_area
+          v.pages_touched v.chunk_count v.algo_chunk_count
         |> output_string chan)
       tbl;
     close_out chan
@@ -162,6 +162,8 @@ type acc = {
   (* The last ones should be reset before each traversal *)
   entry_count : int;
   ancestor_cycle_start : int;
+  leftmost_page_touched : int option;
+  current_chunk : int63 option;
 }
 
 type payload = { truncated_path_rev : string list }
@@ -224,9 +226,10 @@ let on_entry acc (entry : _ Traverse.entry) =
   let kind = kind_of_entry entry in
   let area = acc.area_of_offset entry.offset in
   let ancestor_cycle_start = acc.ancestor_cycle_start in
+  assert (area < ancestor_cycle_start);
   let prefix = entry.payload.truncated_path_rev in
   let extend_prefix = List.length prefix <= 1 && prefix <<>> multiple in
-  if acc.entry_count mod 500_000 = 0 then
+  if acc.entry_count mod 2_000_000 = 0 then
     Fmt.epr "on_entry: %#d, area:%d, kind:%a, prefix:%a\n%!" acc.entry_count
       area pp_kind kind pp_path_prefix_rev prefix;
 
@@ -267,18 +270,59 @@ let on_entry acc (entry : _ Traverse.entry) =
       ({ acc with entry_count = acc.entry_count + 1 }, preds)
 
 let on_chunk acc (chunk : Revbuffer.chunk) =
-  let left = chunk.offset in
-  let right = Int63.add_distance left chunk.length in
-  let area = acc.area_of_offset left in
-  let ancestor_cycle_start = acc.ancestor_cycle_start in
-  assert (area = acc.area_of_offset Int63.(right - one));
+  let first = chunk.offset in
+  let right = Int63.(add_distance first chunk.length) in
+  let last = Int63.(right - one) in
+  let entry_area = acc.area_of_offset first in
+  assert (entry_area = acc.area_of_offset last);
+  let parent_cycle_start = acc.ancestor_cycle_start in
+  assert (entry_area < parent_cycle_start);
+  let k = D2.{ parent_cycle_start; entry_area } in
+  let v : D2.v =
+    let open D2 in
+    match Hashtbl.find_opt acc.d2 k with
+    | None -> { pages_touched = 0; chunk_count = 0; algo_chunk_count = 0 }
+    | Some prev -> prev
+  in
 
-  (* let () =
-   *   let open D2 in
-   *   let k = { parent_cycle_start; entry_area = area } in
-   * in *)
-  ignore chunk;
-  acc
+  (* Fmt.epr "on_chunk: %a\n%!" Revbuffer.pp_chunk chunk;
+   * Fmt.epr "pages: %d/%d (+%d)\n%!" first_page_touched last_page_touched
+   *   incr_pages_touched; *)
+
+  (* 1 - Increment pages_touched *)
+  let first_page_touched = IO.page_idx_of_offset first in
+  let last_page_touched = IO.page_idx_of_offset last in
+  let incr_pages_touched =
+    match acc.leftmost_page_touched with
+    | None -> 1 + Int.distance_exn ~lo:first_page_touched ~hi:last_page_touched
+    | Some leftmost_page_touched ->
+        assert (first_page_touched <= leftmost_page_touched);
+        assert (last_page_touched <= leftmost_page_touched);
+        Int.distance_exn ~lo:first_page_touched ~hi:leftmost_page_touched
+  in
+  let v = { v with pages_touched = v.pages_touched + incr_pages_touched } in
+
+  (* 2 - Increment algo_chunk_count *)
+  let v = { v with algo_chunk_count = v.algo_chunk_count + 1 } in
+
+  (* 3 - Increment chunk_count *)
+  let v =
+    match acc.current_chunk with
+    | None ->
+        assert (v.chunk_count = 0);
+        { v with chunk_count = 1 }
+    | Some prev_left ->
+        if Int63.(right > prev_left) then assert false
+        else if Int63.(right = prev_left) then v
+        else { v with chunk_count = v.chunk_count + 1 }
+  in
+
+  Hashtbl.replace acc.d2 k v;
+  {
+    acc with
+    leftmost_page_touched = Some first_page_touched;
+    current_chunk = Some first;
+  }
 
 let on_read acc ({ first; last } : IO.page_range) =
   ignore (first, last);
@@ -322,20 +366,44 @@ let main () =
   let d2 = Hashtbl.create 1_000 in
   let path_sharing = Hashtbl.create 100 in
   let acc0 =
-    { dict; area_of_offset; d0; d1; d2; path_sharing; entry_count = 0; ancestor_cycle_start = 0 }
+    {
+      dict;
+      area_of_offset;
+      d0;
+      d1;
+      d2;
+      path_sharing;
+      entry_count = 0;
+      ancestor_cycle_start = 0;
+      leftmost_page_touched = None;
+      current_chunk = None;
+    }
   in
 
   let acc =
     List.fold_left
       (fun acc ((c : Cycle_start.t), node_off, _commit_off) ->
+        Fmt.epr "\n%!";
+        Fmt.epr "\n%!";
         assert (area_of_offset node_off = c.cycle_idx - 1);
         let acc =
-          { acc with ancestor_cycle_start = c.cycle_idx; entry_count = 0 }
+          {
+            acc with
+            ancestor_cycle_start = c.cycle_idx;
+            entry_count = 0;
+            leftmost_page_touched = None;
+            current_chunk = None;
+          }
         in
         let payload = { truncated_path_rev = [] } in
-        Traverse.fold path
-          [ (node_off, payload) ]
-          ~merge_payloads ~on_entry ~on_chunk ~on_read acc)
+        let acc =
+          Traverse.fold path
+            [ (node_off, payload) ]
+            ~merge_payloads ~on_entry ~on_chunk ~on_read acc
+        in
+
+        (* if true then failwith "super"; *)
+        acc)
       acc0 cycle_starts
   in
 

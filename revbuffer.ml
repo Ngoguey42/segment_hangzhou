@@ -98,7 +98,7 @@ type chunk = {
 
 let pp_chunk ppf c =
   let right = Int63.add_distance c.offset c.length in
-  Format.fprintf ppf "i:%d, len:%d, left:%#14d, right:%#14d, reason:%a" c.i c.length
+  Format.fprintf ppf "i:%9d, len:%9d, left:%#14d, right:%#14d, reason:%a" c.i c.length
     (Int63.to_int c.offset) (Int63.to_int right) pp_emission_reason c.emission_reason
 
 let chunk_t =
