@@ -154,15 +154,17 @@ end
 
 type acc = {
   dict : Dict.t;
-  entry_count : int;
   area_of_offset : int63 -> int;
   d0 : (D0.k, D0.v) Hashtbl.t;
   d1 : (D1.k, D1.v) Hashtbl.t;
   d2 : (D2.k, D2.v) Hashtbl.t;
   path_sharing : (string list, string list) Hashtbl.t;
+  (* The last ones should be reset before each traversal *)
+  entry_count : int;
+  ancestor_cycle_start : int;
 }
 
-type p = { truncated_path_rev : string list; ancestor_cycle_starts : Intset.t }
+type payload = { truncated_path_rev : string list }
 
 let blob_encoding_prefix_size = 32 + 1
 
@@ -221,16 +223,14 @@ let register_step acc entry_area path_prefix_rev step mode parent_cycle_start =
 let on_entry acc (entry : _ Traverse.entry) =
   let kind = kind_of_entry entry in
   let area = acc.area_of_offset entry.offset in
-  let ancestor_cycle_starts = entry.payload.ancestor_cycle_starts in
+  let ancestor_cycle_start = acc.ancestor_cycle_start in
   let prefix = entry.payload.truncated_path_rev in
   let extend_prefix = List.length prefix <= 1 && prefix <<>> multiple in
   if acc.entry_count mod 500_000 = 0 then
     Fmt.epr "on_entry: %#d, area:%d, kind:%a, prefix:%a\n%!" acc.entry_count
       area pp_kind kind pp_path_prefix_rev prefix;
 
-  Intset.iter
-    (register_entry acc entry area prefix kind)
-    entry.payload.ancestor_cycle_starts;
+  register_entry acc entry area prefix kind ancestor_cycle_start;
 
   match entry.v with
   | `Contents -> ({ acc with entry_count = acc.entry_count + 1 }, [])
@@ -240,9 +240,7 @@ let on_entry acc (entry : _ Traverse.entry) =
       List.iter
         (function
           | Some (step, ((`Direct | `Indirect) as mode)), _off ->
-              Intset.iter
-                (register_step acc area prefix step mode)
-                entry.payload.ancestor_cycle_starts
+              register_step acc area prefix step mode ancestor_cycle_start
           | None, _off -> ())
         raw_preds;
 
@@ -262,7 +260,7 @@ let on_entry acc (entry : _ Traverse.entry) =
                         Hashtbl.add acc.path_sharing path path;
                         path)
             in
-            let payload = { truncated_path_rev; ancestor_cycle_starts } in
+            let payload = { truncated_path_rev } in
             (off, payload))
           raw_preds
       in
@@ -272,13 +270,13 @@ let on_chunk acc (chunk : Revbuffer.chunk) =
   let left = chunk.offset in
   let right = Int63.add_distance left chunk.length in
   let area = acc.area_of_offset left in
+  let ancestor_cycle_start = acc.ancestor_cycle_start in
   assert (area = acc.area_of_offset Int63.(right - one));
 
   (* let () =
    *   let open D2 in
    *   let k = { parent_cycle_start; entry_area = area } in
    * in *)
-
   ignore chunk;
   acc
 
@@ -286,16 +284,15 @@ let on_read acc ({ first; last } : IO.page_range) =
   ignore (first, last);
   acc
 
-let merge_payloads _off
-    ~older:{ truncated_path_rev = l; ancestor_cycle_starts = s }
-    ~newer:{ truncated_path_rev = l'; ancestor_cycle_starts = s' } =
+let merge_payloads _off ~older:{ truncated_path_rev = l }
+    ~newer:{ truncated_path_rev = l' } =
   let truncated_path_rev =
     if l == l' then l else if l === l' then l else multiple
     (* Fmt.failwith "Which path to choose? /%s /%s" ( l |> List.rev |> String.concat "/") *)
     (* ( l' |> List.rev |> String.concat "/") *)
   in
   (* TODO: truncated_path_rev     *)
-  { truncated_path_rev; ancestor_cycle_starts = Intset.union s s' }
+  { truncated_path_rev }
 
 let main () =
   Fmt.epr "Hello World\n%!";
@@ -324,39 +321,24 @@ let main () =
   let d1 = Hashtbl.create 1_000 in
   let d2 = Hashtbl.create 1_000 in
   let path_sharing = Hashtbl.create 100 in
-  let acc0 = { dict; entry_count = 0; area_of_offset; d0; d1; d2; path_sharing } in
-
-  let max_offsets =
-    List.map
-      (fun ((c : Cycle_start.t), node_off, _commit_off) ->
-        assert (area_of_offset node_off = c.cycle_idx - 1);
-        ( node_off,
-          {
-            truncated_path_rev = [];
-            ancestor_cycle_starts =
-              [ c.cycle_idx ] |> List.to_seq |> Intset.of_seq;
-          } ))
-      cycle_starts
+  let acc0 =
+    { dict; area_of_offset; d0; d1; d2; path_sharing; entry_count = 0; ancestor_cycle_start = 0 }
   in
 
   let acc =
-    Traverse.fold path max_offsets ~merge_payloads ~on_entry ~on_chunk ~on_read
-      acc0
+    List.fold_left
+      (fun acc ((c : Cycle_start.t), node_off, _commit_off) ->
+        assert (area_of_offset node_off = c.cycle_idx - 1);
+        let acc =
+          { acc with ancestor_cycle_start = c.cycle_idx; entry_count = 0 }
+        in
+        let payload = { truncated_path_rev = [] } in
+        Traverse.fold path
+          [ (node_off, payload) ]
+          ~merge_payloads ~on_entry ~on_chunk ~on_read acc)
+      acc0 cycle_starts
   in
 
-  (* let () =
-   *   let open D0 in
-   *   Fmt.epr "d0 len: %d\n%!" (Hashtbl.length acc.d0);
-   *   let l =
-   *     Hashtbl.to_seq acc.d0
-   *     |> List.of_seq
-   *     |> List.sort (fun (_, { bytes; _ }) (_, { bytes = bytes'; _ }) ->
-   *            compare bytes' bytes)
-   *   in
-   *   List.iteri
-   *     (fun i (k, v) -> if i < 15 then Fmt.epr "%a %a\n%!" pp_k k pp_v v)
-   *     l
-   * in *)
   D0.save acc.d0;
   D1.save acc.d1;
   D2.save acc.d2;
