@@ -163,6 +163,41 @@ let kind_of_entry (entry : _ Traverse.entry) =
       | V1_nonroot { v = Values _; _ } -> `Inode_nonroot_values
       | V1_nonroot { v = Tree _; _ } -> `Inode_nonroot_tree)
 
+let register_entry acc (entry : _ Traverse.entry) entry_area path_prefix_rev
+    kind parent_cycle_start =
+  let open D0 in
+  let k = { parent_cycle_start; entry_area; path_prefix_rev; kind } in
+  match Hashtbl.find_opt acc.d0 k with
+  | None -> Hashtbl.add acc.d0 k { count = 1; bytes = entry.length }
+  | Some { count; bytes } ->
+      Hashtbl.replace acc.d0 k
+        { count = count + 1; bytes = bytes + entry.length }
+
+let register_step acc entry_area path_prefix_rev step mode parent_cycle_start =
+  let open D1 in
+  let k = { parent_cycle_start; entry_area; path_prefix_rev } in
+  let size = dynamic_size_of_step_encoding step in
+  let incr_indirect, incr_direct, incr_direct_bytes =
+    match mode with
+    | `Indirect -> (1, 0, 0)
+    | `Direct -> (0, 1, dynamic_size_of_step_encoding step)
+  in
+  match Hashtbl.find_opt acc.d1 k with
+  | None ->
+      Hashtbl.add acc.d1 k
+        {
+          indirect_count = incr_indirect;
+          direct_count = incr_direct;
+          direct_bytes = incr_direct_bytes;
+        }
+  | Some prev ->
+      Hashtbl.replace acc.d1 k
+        {
+          indirect_count = incr_indirect + prev.indirect_count;
+          direct_count = incr_direct + prev.direct_count;
+          direct_bytes = incr_direct_bytes + prev.direct_bytes;
+        }
+
 let on_entry acc (entry : _ Traverse.entry) =
   let kind = kind_of_entry entry in
   let area = acc.area_of_offset entry.offset in
@@ -174,59 +209,22 @@ let on_entry acc (entry : _ Traverse.entry) =
       area pp_kind kind pp_path_prefix_rev prefix;
 
   Intset.iter
-    (fun parent_cycle_start ->
-      let open D0 in
-      let entry_area = area in
-      let path_prefix_rev = prefix in
-      let kind = kind in
-      let k = { parent_cycle_start; entry_area; path_prefix_rev; kind } in
-      match Hashtbl.find_opt acc.d0 k with
-      | None -> Hashtbl.add acc.d0 k { count = 1; bytes = entry.length }
-      | Some { count; bytes } ->
-          Hashtbl.replace acc.d0 k
-            { count = count + 1; bytes = bytes + entry.length })
+    (register_entry acc entry area prefix kind)
     entry.payload.ancestor_cycle_starts;
-
-  let register_step step mode parent_cycle_start =
-    let open D1 in
-    let entry_area = area in
-    let path_prefix_rev = prefix in
-    let k = { parent_cycle_start; entry_area; path_prefix_rev } in
-    let size = dynamic_size_of_step_encoding step in
-    let incr_indirect, incr_direct, incr_direct_bytes =
-      match mode with
-      | `Indirect -> (1, 0, 0)
-      | `Direct -> (0, 1, dynamic_size_of_step_encoding step)
-    in
-    match Hashtbl.find_opt acc.d1 k with
-    | None ->
-        Hashtbl.add acc.d1 k
-          {
-            indirect_count = incr_indirect;
-            direct_count = incr_direct;
-            direct_bytes = incr_direct_bytes;
-          }
-    | Some prev ->
-        Hashtbl.replace acc.d1 k
-          {
-            indirect_count = incr_indirect + prev.indirect_count;
-            direct_count = incr_direct + prev.direct_count;
-            direct_bytes = incr_direct_bytes + prev.direct_bytes;
-          }
-  in
 
   match entry.v with
   | `Contents -> ({ acc with entry_count = acc.entry_count + 1 }, [])
   | `Inode t ->
-      let preds = preds_of_inode acc.dict t in
+      let raw_preds = preds_of_inode acc.dict t in
 
       List.iter
         (function
           | Some (step, ((`Direct | `Indirect) as mode)), _off ->
-              Intset.iter (register_step step mode)
+              Intset.iter
+                (register_step acc area prefix step mode)
                 entry.payload.ancestor_cycle_starts
           | None, _off -> ())
-        preds;
+        raw_preds;
 
       let preds =
         List.map
@@ -246,7 +244,7 @@ let on_entry acc (entry : _ Traverse.entry) =
             in
             let payload = { truncated_path_rev; ancestor_cycle_starts } in
             (off, payload))
-          preds
+          raw_preds
       in
       ({ acc with entry_count = acc.entry_count + 1 }, preds)
 
