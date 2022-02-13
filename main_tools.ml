@@ -43,11 +43,11 @@ let offset_of_address =
 let expand_name dict name =
   let open Traverse.Inode.Compress in
   match name with
-  | Direct s -> s
+  | Direct s -> s, `Direct
   | Indirect key ->
     match   Dict.find dict key with
     | None -> assert false
-    | Some s -> s
+    | Some s -> s, `Indirect
 
 let preds_of_inode dict v =
   let open Traverse.Inode.Compress in

@@ -20,6 +20,11 @@
      - # of total entries (needed for leftover calculation)
      - # of total bytes used (needed for leftover calculation)
 
+entries
+dict
+mem_layout
+areas
+
    missing infos:
    - which area references which area? (i.e. analysis of pq when changing area)
    - intersection between trees
@@ -66,6 +71,11 @@ type kind =
   | `Inode_root_values ]
 [@@deriving repr ~pp]
 
+let dynamic_size_of_step_encoding =
+  match Irmin.Type.Size.of_value Store.step_t with
+  | Dynamic f -> f
+  | Static _ | Unknown -> assert false
+
 let multiple = [ "multiple" ]
 
 let pp_path_prefix_rev ppf l =
@@ -83,7 +93,9 @@ module D0 = struct
 
   type v = { count : int; bytes : int } [@@deriving repr ~pp]
 
-  let save path tbl =
+  let path = "./entries.csv"
+
+  let save tbl =
     let chan = open_out path in
     output_string chan
       "parent_cycle_start,entry_area,path_prefix,kind,count,bytes\n";
@@ -96,11 +108,37 @@ module D0 = struct
     close_out chan
 end
 
+module D1 = struct
+  type k = {
+    parent_cycle_start : int;
+    entry_area : int;
+    path_prefix_rev : string list;
+  }
+
+  type v = { indirect_count : int; direct_count : int; direct_bytes : int }
+
+  let path = "./steps.csv"
+
+  let save tbl =
+    let chan = open_out path in
+    output_string chan
+      "parent_cycle_start,entry_area,path_prefix,indirect_count,direct_count,direct_bytes\n";
+    Hashtbl.iter
+      (fun k v ->
+        Fmt.str "%d,%d,%a,%d,%d,%d\n" k.parent_cycle_start k.entry_area
+          pp_path_prefix_rev k.path_prefix_rev v.indirect_count v.direct_count
+          v.direct_bytes
+        |> output_string chan)
+      tbl;
+    close_out chan
+end
+
 type acc = {
   dict : Dict.t;
   entry_count : int;
   area_of_offset : int63 -> int;
   d0 : (D0.k, D0.v) Hashtbl.t;
+  d1 : (D1.k, D1.v) Hashtbl.t;
   path_sharing : (string list, string list) Hashtbl.t;
 }
 
@@ -130,53 +168,87 @@ let on_entry acc (entry : _ Traverse.entry) =
   let area = acc.area_of_offset entry.offset in
   let ancestor_cycle_starts = entry.payload.ancestor_cycle_starts in
   let prefix = entry.payload.truncated_path_rev in
+  let extend_prefix = List.length prefix <= 1 && prefix <<>> multiple in
+  if acc.entry_count mod 500_000 = 0 then
+    Fmt.epr "on_entry: %#d, area:%d, kind:%a, prefix:%a\n%!" acc.entry_count
+      area pp_kind kind pp_path_prefix_rev prefix;
+
   Intset.iter
     (fun parent_cycle_start ->
       let open D0 in
       let entry_area = area in
       let path_prefix_rev = prefix in
       let kind = kind in
-      let k0 = { parent_cycle_start; entry_area; path_prefix_rev; kind } in
-      match Hashtbl.find_opt acc.d0 k0 with
-      | None -> Hashtbl.add acc.d0 k0 { count = 1; bytes = entry.length }
+      let k = { parent_cycle_start; entry_area; path_prefix_rev; kind } in
+      match Hashtbl.find_opt acc.d0 k with
+      | None -> Hashtbl.add acc.d0 k { count = 1; bytes = entry.length }
       | Some { count; bytes } ->
-          Hashtbl.replace acc.d0 k0
+          Hashtbl.replace acc.d0 k
             { count = count + 1; bytes = bytes + entry.length })
     entry.payload.ancestor_cycle_starts;
 
-  if acc.entry_count mod 500_000 = 0 then
-    Fmt.epr "on_entry: %#d, area:%d, kind:%a, prefix:%a\n%!" acc.entry_count
-      area pp_kind kind pp_path_prefix_rev prefix;
-
-  (* if not @@ Hashtbl.mem lol prefix then (
-   *   Fmt.epr "/%s \n%!" (prefix |> List.rev |> String.concat "/");
-   *   Hashtbl.add lol prefix ()); *)
-  let extend_prefix = List.length prefix <= 1 && prefix <<>> multiple in
-  let preds =
-    match entry.v with
-    | `Contents -> []
-    | `Inode t ->
-        preds_of_inode acc.dict t
-        |> List.map (fun (step_opt, off) ->
-               let truncated_path_rev =
-                 if not extend_prefix then prefix
-                 else
-                   match step_opt with
-                   | None -> prefix
-                   | Some step -> (
-                       let path = step :: prefix in
-                       match Hashtbl.find_opt acc.path_sharing path with
-                       | Some path -> path
-                       | None ->
-                           Hashtbl.add acc.path_sharing path path;
-                           path)
-               in
-
-               let payload = { truncated_path_rev; ancestor_cycle_starts } in
-               (off, payload))
+  let register_step step mode parent_cycle_start =
+    let open D1 in
+    let entry_area = area in
+    let path_prefix_rev = prefix in
+    let k = { parent_cycle_start; entry_area; path_prefix_rev } in
+    let size = dynamic_size_of_step_encoding step in
+    let incr_indirect, incr_direct, incr_direct_bytes =
+      match mode with
+      | `Indirect -> (1, 0, 0)
+      | `Direct -> (0, 1, dynamic_size_of_step_encoding step)
+    in
+    match Hashtbl.find_opt acc.d1 k with
+    | None ->
+        Hashtbl.add acc.d1 k
+          {
+            indirect_count = incr_indirect;
+            direct_count = incr_direct;
+            direct_bytes = incr_direct_bytes;
+          }
+    | Some prev ->
+        Hashtbl.replace acc.d1 k
+          {
+            indirect_count = incr_indirect + prev.indirect_count;
+            direct_count = incr_direct + prev.direct_count;
+            direct_bytes = incr_direct_bytes + prev.direct_bytes;
+          }
   in
 
-  ({ acc with entry_count = acc.entry_count + 1 }, preds)
+  match entry.v with
+  | `Contents -> ({ acc with entry_count = acc.entry_count + 1 }, [])
+  | `Inode t ->
+      let preds = preds_of_inode acc.dict t in
+
+      List.iter
+        (function
+          | Some (step, ((`Direct | `Indirect) as mode)), _off ->
+              Intset.iter (register_step step mode)
+                entry.payload.ancestor_cycle_starts
+          | None, _off -> ())
+        preds;
+
+      let preds =
+        List.map
+          (fun (step_opt, off) ->
+            let truncated_path_rev =
+              if not extend_prefix then prefix
+              else
+                match step_opt with
+                | None -> prefix
+                | Some (step, (`Direct | `Indirect)) -> (
+                    let path = step :: prefix in
+                    match Hashtbl.find_opt acc.path_sharing path with
+                    | Some path -> path
+                    | None ->
+                        Hashtbl.add acc.path_sharing path path;
+                        path)
+            in
+            let payload = { truncated_path_rev; ancestor_cycle_starts } in
+            (off, payload))
+          preds
+      in
+      ({ acc with entry_count = acc.entry_count + 1 }, preds)
 
 let on_chunk acc (chunk : Revbuffer.chunk) =
   ignore chunk;
@@ -217,9 +289,10 @@ let main () =
     in
     closest_cycle_start_on_the_right - 1
   in
-  let d0 = Hashtbl.create 1_000_000 in
+  let d0 = Hashtbl.create 1_000 in
+  let d1 = Hashtbl.create 1_000 in
   let path_sharing = Hashtbl.create 100 in
-  let acc0 = { dict; entry_count = 0; area_of_offset; d0; path_sharing } in
+  let acc0 = { dict; entry_count = 0; area_of_offset; d0; d1; path_sharing } in
 
   let max_offsets =
     List.map
@@ -239,20 +312,21 @@ let main () =
       acc0
   in
 
-  let () =
-    let open D0 in
-    Fmt.epr "d0 len: %d\n%!" (Hashtbl.length acc.d0);
-    let l =
-      Hashtbl.to_seq acc.d0
-      |> List.of_seq
-      |> List.sort (fun (_, { bytes; _ }) (_, { bytes = bytes'; _ }) ->
-             compare bytes' bytes)
-    in
-    List.iteri
-      (fun i (k, v) -> if i < 15 then Fmt.epr "%a %a\n%!" pp_k k pp_v v)
-      l
-  in
-  D0.save "d0.csv" acc.d0;
+  (* let () =
+   *   let open D0 in
+   *   Fmt.epr "d0 len: %d\n%!" (Hashtbl.length acc.d0);
+   *   let l =
+   *     Hashtbl.to_seq acc.d0
+   *     |> List.of_seq
+   *     |> List.sort (fun (_, { bytes; _ }) (_, { bytes = bytes'; _ }) ->
+   *            compare bytes' bytes)
+   *   in
+   *   List.iteri
+   *     (fun i (k, v) -> if i < 15 then Fmt.epr "%a %a\n%!" pp_k k pp_v v)
+   *     l
+   * in *)
+  D0.save acc.d0;
+  D1.save acc.d1;
   Fmt.epr "Bye World\n%!";
   Lwt.return_unit
 
