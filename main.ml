@@ -8,6 +8,7 @@
    - which area references which area? (i.e. analysis of pq when changing area)
    - intersection between trees
    - breakdown of everything in a pack file
+   - space taken by length field
 
    to show:
    - (leftward horizontal histogram?) averaged on all ref commits
