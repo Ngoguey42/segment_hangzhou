@@ -3,27 +3,6 @@
     Requires https://github.com/Ngoguey42/irmin/pull/new/expose-compress *)
 
 (*
-   - genre: (blob-{0-31,32-127,128,511,512+}|inode-{root,inner}-{tree,val})
-
-   collected infos:
-   - "per commit tree" x "per pack-file-area" x "per path prefix" x "per genre"
-     - # of entries
-     - # of bytes used
-   - "per commit tree" x "per pack-file-area" x "per path prefix" x ()
-     - # of bytes used by hard-coded steps
-     - # of hard-coded steps
-     - # of dict steps
-   - "per commit tree" x "per pack-file-area" x ()                x ()
-     - # of pages touched
-     - # of chunks (contiguous groups)
-   - () x                "per pack-file-area" x ()                x "per genre + commit"
-     - # of total entries (needed for leftover calculation)
-     - # of total bytes used (needed for leftover calculation)
-
-entries
-dict
-mem_layout
-areas
 
    missing infos:
    - which area references which area? (i.e. analysis of pq when changing area)
@@ -381,10 +360,7 @@ let merge_payloads _off ~older:{ truncated_path_rev = l }
     ~newer:{ truncated_path_rev = l' } =
   let truncated_path_rev =
     if l == l' then l else if l === l' then l else multiple
-    (* Fmt.failwith "Which path to choose? /%s /%s" ( l |> List.rev |> String.concat "/") *)
-    (* ( l' |> List.rev |> String.concat "/") *)
   in
-  (* TODO: truncated_path_rev     *)
   { truncated_path_rev }
 
 let main () =
@@ -422,6 +398,7 @@ let main () =
         let right = Int63.add_distance off length in
         assert (Int63.(right <= offset_to_stop_at));
         let area = area_of_offset left in
+        assert (area = area_of_offset Int63.(right - one));
         let open D3 in
         let kind =
           match entry with
@@ -439,13 +416,10 @@ let main () =
                 byte_count = prev.byte_count + length;
               }
         in
-
         Hashtbl.replace d3 k v;
-        (* if Int63.to_int off > 11_199_000 || Int63.to_int off < 100 then *)
         (* Fmt.epr "on_entry %#14d, %d, %a, area:%d\n%!" (Int63.to_int off) length
          *   (Repr.pp Irmin_pack.Pack_value.Kind.t)
          *   kind area; *)
-        assert (area = area_of_offset Int63.(right - one));
         ((), Int63.(right < offset_to_stop_at)));
     D3.save d3
   in
