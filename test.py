@@ -28,6 +28,12 @@
 # - In an "average tree", over distance to commit, what is touched?
 #   - % of pages, % of bytes
 #
+# - Over all trees, how many pages of data are needed to be read
+#
+#
+#
+#
+#
 # - Maybe section on data that I dropped
 #   - the root stuff
 #   - indirect count vs direct count
