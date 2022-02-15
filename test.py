@@ -30,7 +30,7 @@
 #
 # - Over all trees, how many pages of data are needed to be read
 #
-#
+# -TODO: need the distribution of relative offsets (in bytes and entries)
 #
 #
 #
