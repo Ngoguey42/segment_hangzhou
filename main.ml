@@ -54,8 +54,9 @@ type contents_kind =
   [ `Contents_0_31 | `Contents_128_511 | `Contents_32_127 | `Contents_512_plus ]
 
 type inode_root = [ `Inode_root_tree | `Inode_root_values ]
-type inode_intermediate = [ `Inode_nonroot_tree ]
-type inode_terminal_nonroot = [ `Inode_nonroot_values ]
+type inode_nonroot = [ `Inode_nonroot_tree | `Inode_nonroot_values ]
+(* type inode_intermediate = [ `Inode_nonroot_tree ] *)
+(* type inode_terminal_nonroot = [ `Inode_nonroot_values ] *)
 
 type kind =
   [ `Contents_0_31
@@ -85,13 +86,25 @@ let dynamic_size_of_step_encoding =
   | Dynamic f -> f
   | Static _ | Unknown -> assert false
 
-type past = { path : [ `Multiple | `Single of string list ] }
-    (* root_inode_length : int option; *)
+(* TODO: past to context *)
+type past = {
+  path : [ `Multiple | `Single of string list ];
+  node_length : [ `Outside | `Multiple | `Inside_one of int ];
+}
 
-let pp_past ppf = function
-  | { path = `Multiple } -> Format.fprintf ppf "multiple"
-  | { path = `Single stared_path_rev } ->
-      Format.fprintf ppf "/%s" (stared_path_rev |> List.rev |> String.concat "/")
+let pp_past ppf past =
+  let () =
+    match past.path with
+    | `Multiple -> Format.fprintf ppf "multiple"
+    | `Single stared_path_rev ->
+        Format.fprintf ppf "/%s"
+          (stared_path_rev |> List.rev |> String.concat "/")
+  in
+  Format.fprintf ppf ",";
+  match past.node_length with
+  | `Multiple -> Format.fprintf ppf "multiple"
+  | `Outside -> ()
+  | `Inside_one len -> Format.fprintf ppf "%d" len
 
 module D0 = struct
   type k = {
@@ -262,20 +275,50 @@ let on_entry acc (entry : _ Traverse.entry) =
   assert (area < ancestor_cycle_start);
 
   let past = entry.payload in
-  let current = past in
+  let current =
+    let node_length =
+      match (kind, past.node_length) with
+      | #contents_kind, `Outside -> `Outside
+      | #contents_kind, _ -> assert false
+      | #inode_root, `Outside -> `Inside_one (node_length_of_entry_exn entry)
+      | #inode_root, _ -> assert false
+      (* | #inode_intermediate, `Multiple -> `Multiple *)
+      (* | #inode_intermediate, `Inside_one len -> `Inside_one len *)
+      (* | #inode_intermediate, `Outside -> assert false *)
+
+      (* | #inode_terminal_nonroot, `Multiple -> `Outside
+       * | #inode_terminal_nonroot, `Inside_one _ -> `Outside
+       * | #inode_terminal_nonroot, `Outside -> assert false *)
+      | #inode_nonroot, `Multiple -> `Multiple
+      | #inode_nonroot, `Inside_one len -> `Inside_one len
+      | #inode_nonroot, `Outside -> assert false
+    in
+
+    { past with node_length }
+  in
   let past_of_child step_opt =
-    match current with
-    | { path = `Multiple } -> current
-    | { path = `Single stared_path_rev } ->
-        let stared_path_rev =
-          match step_opt with
-          | None -> stared_path_rev
-          | Some (step, (`Direct | `Indirect)) ->
-              assert (step <<>> "*");
-              if List.length stared_path_rev < 2 then step :: stared_path_rev
-              else "*" :: stared_path_rev
-        in
-        { path = `Single stared_path_rev }
+    let path =
+      match current.path with
+      | `Multiple -> `Multiple
+      | `Single stared_path_rev ->
+          let stared_path_rev =
+            match step_opt with
+            | None -> stared_path_rev
+            | Some (step, (`Direct | `Indirect)) ->
+                assert (step <<>> "*");
+                if List.length stared_path_rev < 2 then step :: stared_path_rev
+                else "*" :: stared_path_rev
+          in
+          `Single stared_path_rev
+    in
+    let node_length =
+      match (step_opt, current.node_length) with
+      | None, `Inside_one len -> `Inside_one len
+      | None, _ -> assert false
+      | Some _, (`Multiple | `Inside_one _) -> `Outside
+      | Some _, `Outside -> assert false
+    in
+    { path; node_length }
   in
 
   if acc.entry_count mod 2_000_000 = 0 then
@@ -289,17 +332,6 @@ let on_entry acc (entry : _ Traverse.entry) =
   register_entry acc entry.length current area kind ancestor_cycle_start
     raw_preds;
 
-  (* let root_inode_length =
-   *   match (kind, entry.payload.root_inode_length) with
-   *   | #contents_kind, None -> None
-   *   | #contents_kind, Some _ -> assert false
-   *   | #inode_intermediate, Some len -> Some len
-   *   | #inode_intermediate, None -> assert false
-   *   | #inode_root, None -> Some (node_length_of_entry_exn entry)
-   *   | #inode_root, Some _ -> assert false
-   *   | #inode_terminal_nonroot, Some _ -> None
-   *   | #inode_terminal_nonroot, None -> assert false
-   * in *)
   let preds =
     List.map (fun (step_opt, off) -> (off, past_of_child step_opt)) raw_preds
   in
@@ -365,9 +397,15 @@ let on_read acc ({ first; last } : IO.page_range) =
   acc
 
 let merge_payloads _off ~older ~newer =
-  match (older, newer) with
-  | { path = `Single l }, { path = `Single l' } when l === l' -> older
-  | _ -> { path = `Multiple }
+  let path = if older.path === newer.path then older.path else `Multiple in
+  let node_length =
+    if older.node_length === newer.node_length then older.node_length
+    else
+      match (older.node_length, newer.node_length) with
+      | (`Inside_one _ | `Multiple), (`Inside_one _ | `Multiple) -> `Multiple
+      | _ -> assert false
+  in
+  { path; node_length }
 
 let main () =
   Fmt.epr "Hello World\n%!";
@@ -463,7 +501,7 @@ let main () =
         in
         let acc =
           Traverse.fold path
-            [ (node_off, { path = `Single [] }) ]
+            [ (node_off, { path = `Single []; node_length = `Outside }) ]
             ~merge_payloads ~on_entry ~on_chunk ~on_read acc
         in
 
