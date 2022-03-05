@@ -16,16 +16,6 @@
    - Split [Inode_root_tree] given length 33-256, 257-2048, 2049-16384, 16385+
    - Split [Inode_nonroot_tree] and [Inode_nonroot_values] given their
      root length: 33-256, 257-2048, 2049-16384, 16385+, multiple
-   - Let's record more about paths:
-     - The exact names up to len 2, and stars for higher lenghts
-     - "/"
-     - "/data/"
-     - "/data/contracts"
-     - "/data/contracts/*"
-     - "/data/contracts/*/*"
-     - "/data/contracts/*/*/*"
-     - "/data/contracts/*/*/*/*"
-     - "/data/contracts/*/*/*/*/*"
 
    missing infos (osef for now):
    - are the steps uniques?
@@ -250,13 +240,19 @@ let register_entry acc (entry : _ Traverse.entry) entry_area path_prefix_rev
   in
   Hashtbl.replace acc.d0 k v
 
+let cons_rev_path prefix step =
+  assert (step <<>> "*");
+  if prefix === multiple then multiple
+  else if List.length prefix < 2 then step :: prefix
+  else "*" :: prefix
+
 let on_entry acc (entry : _ Traverse.entry) =
   let kind = kind_of_entry entry in
   let area = acc.area_of_offset entry.offset in
   let ancestor_cycle_start = acc.ancestor_cycle_start in
   assert (area < ancestor_cycle_start);
   let prefix = entry.payload.truncated_path_rev in
-  let extend_prefix = List.length prefix <= 1 && prefix <<>> multiple in
+  (* let extend_prefix = List.length prefix <= 1 && prefix <<>> multiple in *)
   if acc.entry_count mod 2_000_000 = 0 then
     Fmt.epr "on_entry: %#d, area:%d, kind:%a, prefix:%a\n%!" acc.entry_count
       area pp_kind kind pp_path_prefix_rev prefix;
@@ -271,17 +267,21 @@ let on_entry acc (entry : _ Traverse.entry) =
     List.map
       (fun (step_opt, off) ->
         let truncated_path_rev =
-          if not extend_prefix then prefix
-          else
+          (* if not extend_prefix then prefix *)
+          (* else *)
             match step_opt with
             | None -> prefix
             | Some (step, (`Direct | `Indirect)) -> (
-                let path = step :: prefix in
-                match Hashtbl.find_opt acc.path_sharing path with
-                | Some path -> path
-                | None ->
-                    Hashtbl.add acc.path_sharing path path;
-                    path)
+                cons_rev_path prefix step
+              (* let path =  in
+               *
+               *   let path = step :: prefix in
+               *   match Hashtbl.find_opt acc.path_sharing path with
+               *   | Some path -> path
+               *   | None ->
+               *       Hashtbl.add acc.path_sharing path path;
+               *       path *)
+                      )
         in
         let payload = { truncated_path_rev } in
         (off, payload))
