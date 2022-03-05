@@ -178,6 +178,8 @@ module Make (Conf : Irmin_pack.Conf.S) (Schema : Irmin.Schema.Extended) = struct
     | Contents ->
         (* TODO: decode blobs with timings, only if user wishes to
            (use GADT conf) *)
+        (* TODO: Maybe a mode where we return key of contents and
+           another where we return completely decoded contents. *)
         (`Contents, length)
     | Inode_v2_root | Inode_v2_nonroot ->
         let v =

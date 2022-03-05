@@ -3,30 +3,48 @@
     Requires https://github.com/Ngoguey42/irmin/pull/new/expose-compress *)
 
 (*
+   D0 (old d0 + d1):
+   Info per pack file entry
 
-   missing infos:
-   - which area references which area? (i.e. analysis of pq when changing area)
-   - intersection between trees
-   - breakdown of everything in a pack file
+   D1 (old d2):
+   Infor per pack file area
+
+   about to impl:
+   - Merge d0 and d1
+   - Split [Inode_root_tree] given length 33-256, 257-2048, 2049-16384, 16385+
+   - Split [Inode_nonroot_tree] and [Inode_nonroot_values] given their
+     root length: 33-256, 257-2048, 2049-16384, 16385+
+   - Let's record more about paths:
+     - The exact names up to len 2, and stars for higher lenghts
+     - "/"
+     - "/data/"
+     - "/data/contracts"
+     - "/data/contracts/*"
+     - "/data/contracts/*/*"
+     - "/data/contracts/*/*/*"
+     - "/data/contracts/*/*/*/*"
+     - "/data/contracts/*/*/*/*/*"
+
+   missing infos (osef for now):
+   - are the steps uniques?
+     - Inside single tree
+     - Cross tree
+   - are the hashes uniques?
+     - Inside single tree
+     - Cross tree
+   - average relative offset lenghts
+     - Inside single tree
    - space taken by length field
+   - which area references which area? (i.e. analysis of pq when changing area)
+   - intersection between trees (put source trees in payload)
+   - number of times an object is referenced
+     - Inside single tree
+     - Cross tree
 
-   to show:
-   - (leftward horizontal histogram?) averaged on all ref commits
-     - at which cycle-distance are all genre (entry weighted / bytes weighted)
-     - at which cycle-distance are all paths (entry weighted / bytes weighted)
-   - (camembert) averaged on all ref commits + (curves) evolution for all ref commits
-     - at which cycle-distance are the entries (entry weighted / bytes weighted)
-     - number in each genre  (entry weighted / bytes weighted)
-     - number in each directory (entry weighted / bytes weighted)
-     - which path grows the most (entry weighted / bytes weighted)
-
-    morallement, quelles info je veux:
-    -
-    -
-    -
-    -
-    -
-    -
+  thoughts:
+   - I learned that they want to freeze at each cycle. I don't think it
+     changes much for the plots, the reader should just consider distance 0
+     and distance 1+
 
 *)
 open Import
