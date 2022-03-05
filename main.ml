@@ -85,22 +85,19 @@ let dynamic_size_of_step_encoding =
   | Dynamic f -> f
   | Static _ | Unknown -> assert false
 
-type parents =
-  | Multiple
-  | Single of {
-      stared_path_rev : string list; (* root_inode_length : int option; *)
-    }
+type past = { path : [ `Multiple | `Single of string list ] }
+    (* root_inode_length : int option; *)
 
-let pp_parents ppf = function
-  | Multiple -> Format.fprintf ppf "multiple"
-  | Single { stared_path_rev } ->
+let pp_past ppf = function
+  | { path = `Multiple } -> Format.fprintf ppf "multiple"
+  | { path = `Single stared_path_rev } ->
       Format.fprintf ppf "/%s" (stared_path_rev |> List.rev |> String.concat "/")
 
 module D0 = struct
   type k = {
     parent_cycle_start : int;
     entry_area : int;
-    parents : parents;
+    past : past;
     kind : kind;
   }
 
@@ -122,7 +119,7 @@ module D0 = struct
     Hashtbl.iter
       (fun k v ->
         Fmt.str "%d,%d,%a,%a,%d,%d,%d,%d,%d\n" k.parent_cycle_start k.entry_area
-          pp_parents k.parents pp_kind k.kind v.count v.bytes v.indirect_count
+          pp_past k.past pp_kind k.kind v.count v.bytes v.indirect_count
           v.direct_count v.direct_bytes
         |> output_string chan)
       tbl;
@@ -224,10 +221,10 @@ let kind_of_entry (entry : _ Traverse.entry) =
   | `Contents -> kind_of_contents entry.length
   | `Inode t -> kind_of_inode t
 
-let register_entry acc (entry : _ Traverse.entry) entry_area kind
-    parent_cycle_start raw_preds =
+let register_entry acc length past entry_area kind parent_cycle_start raw_preds
+    =
   let open D0 in
-  let k = { parent_cycle_start; entry_area; parents = entry.payload; kind } in
+  let k = { parent_cycle_start; entry_area; past; kind } in
   let v =
     match Hashtbl.find_opt acc.d0 k with
     | None ->
@@ -240,7 +237,7 @@ let register_entry acc (entry : _ Traverse.entry) entry_area kind
         }
     | Some e -> e
   in
-  let v = { v with count = v.count + 1; bytes = v.bytes + entry.length } in
+  let v = { v with count = v.count + 1; bytes = v.bytes + length } in
   let v =
     List.fold_left
       (fun v -> function
@@ -258,34 +255,39 @@ let register_entry acc (entry : _ Traverse.entry) entry_area kind
   in
   Hashtbl.replace acc.d0 k v
 
-let build_payload parents step_opt =
-  match parents with
-  | Multiple -> Multiple
-  | Single { stared_path_rev } ->
-      let stared_path_rev =
-        match step_opt with
-        | None -> stared_path_rev
-        | Some (step, (`Direct | `Indirect)) ->
-            assert (step <<>> "*");
-            if List.length stared_path_rev < 2 then step :: stared_path_rev
-            else "*" :: stared_path_rev
-      in
-      Single { stared_path_rev }
-
 let on_entry acc (entry : _ Traverse.entry) =
   let kind = kind_of_entry entry in
   let area = acc.area_of_offset entry.offset in
   let ancestor_cycle_start = acc.ancestor_cycle_start in
   assert (area < ancestor_cycle_start);
+
+  let past = entry.payload in
+  let current = past in
+  let past_of_child step_opt =
+    match current with
+    | { path = `Multiple } -> current
+    | { path = `Single stared_path_rev } ->
+        let stared_path_rev =
+          match step_opt with
+          | None -> stared_path_rev
+          | Some (step, (`Direct | `Indirect)) ->
+              assert (step <<>> "*");
+              if List.length stared_path_rev < 2 then step :: stared_path_rev
+              else "*" :: stared_path_rev
+        in
+        { path = `Single stared_path_rev }
+  in
+
   if acc.entry_count mod 2_000_000 = 0 then
-    Fmt.epr "on_entry: %#d, area:%d, kind:%a, parent_payload:%a\n%!"
-      acc.entry_count area pp_kind kind pp_parents entry.payload;
+    Fmt.epr "on_entry: %#d, area:%d, kind:%a, past:%a current:%a\n%!"
+      acc.entry_count area pp_kind kind pp_past past pp_past current;
 
   let raw_preds =
     match entry.v with `Contents -> [] | `Inode t -> preds_of_inode acc.dict t
   in
 
-  register_entry acc entry area kind ancestor_cycle_start raw_preds;
+  register_entry acc entry.length current area kind ancestor_cycle_start
+    raw_preds;
 
   (* let root_inode_length =
    *   match (kind, entry.payload.root_inode_length) with
@@ -299,11 +301,7 @@ let on_entry acc (entry : _ Traverse.entry) =
    *   | #inode_terminal_nonroot, None -> assert false
    * in *)
   let preds =
-    List.map
-      (fun (step_opt, off) ->
-        let payload = build_payload entry.payload step_opt in
-        (off, payload))
-      raw_preds
+    List.map (fun (step_opt, off) -> (off, past_of_child step_opt)) raw_preds
   in
   ({ acc with entry_count = acc.entry_count + 1 }, preds)
 
@@ -368,8 +366,8 @@ let on_read acc ({ first; last } : IO.page_range) =
 
 let merge_payloads _off ~older ~newer =
   match (older, newer) with
-  | Single _, Single _ when older === newer -> older
-  | _ -> Multiple
+  | { path = `Single l }, { path = `Single l' } when l === l' -> older
+  | _ -> { path = `Multiple }
 
 let main () =
   Fmt.epr "Hello World\n%!";
@@ -465,7 +463,7 @@ let main () =
         in
         let acc =
           Traverse.fold path
-            [ (node_off, Single { stared_path_rev = [] }) ]
+            [ (node_off, { path = `Single [] }) ]
             ~merge_payloads ~on_entry ~on_chunk ~on_read acc
         in
 
