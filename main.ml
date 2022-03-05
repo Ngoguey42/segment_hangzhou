@@ -86,20 +86,21 @@ let dynamic_size_of_step_encoding =
   | Dynamic f -> f
   | Static _ | Unknown -> assert false
 
+type past_path = [ `Multiple | `Single of string list ]
+
+let pp_past_path ppf = function
+  | `Multiple -> Format.fprintf ppf "multiple"
+  | `Single stared_path_rev ->
+      Format.fprintf ppf "/%s" (stared_path_rev |> List.rev |> String.concat "/")
+
 (* TODO: past to context *)
 type past = {
-  path : [ `Multiple | `Single of string list ];
+  path : past_path;
   node_length : [ `Outside | `Multiple | `Inside_one of int ];
 }
 
 let pp_past ppf past =
-  let () =
-    match past.path with
-    | `Multiple -> Format.fprintf ppf "multiple"
-    | `Single stared_path_rev ->
-        Format.fprintf ppf "/%s"
-          (stared_path_rev |> List.rev |> String.concat "/")
-  in
+  pp_past_path ppf past.path;
   Format.fprintf ppf ",";
   match past.node_length with
   | `Multiple -> Format.fprintf ppf "multiple"
@@ -110,7 +111,7 @@ module D0 = struct
   type k = {
     parent_cycle_start : int;
     entry_area : int;
-    past : past;
+    path : past_path;
     kind : kind;
   }
 
@@ -128,11 +129,11 @@ module D0 = struct
   let save tbl =
     let chan = open_out path in
     output_string chan
-      "parent_cycle_start,entry_area,path_prefix,kind,count,bytes,indirect_count,direct_count,direct_bytes\n";
+      "parent_cycle_start,entry_area,path,kind,count,bytes,indirect_count,direct_count,direct_bytes\n";
     Hashtbl.iter
       (fun k v ->
         Fmt.str "%d,%d,%a,%a,%d,%d,%d,%d,%d\n" k.parent_cycle_start k.entry_area
-          pp_past k.past pp_kind k.kind v.count v.bytes v.indirect_count
+          pp_past_path k.path pp_kind k.kind v.count v.bytes v.indirect_count
           v.direct_count v.direct_bytes
         |> output_string chan)
       tbl;
@@ -234,10 +235,10 @@ let kind_of_entry (entry : _ Traverse.entry) =
   | `Contents -> kind_of_contents entry.length
   | `Inode t -> kind_of_inode t
 
-let register_entry acc length past entry_area kind parent_cycle_start raw_preds
-    =
+let register_entry ~acc ~length ~(past : past) ~entry_area ~kind
+    ~parent_cycle_start ~raw_preds =
   let open D0 in
-  let k = { parent_cycle_start; entry_area; past; kind } in
+  let k = { parent_cycle_start; entry_area; path = past.path; kind } in
   let v =
     match Hashtbl.find_opt acc.d0 k with
     | None ->
@@ -329,8 +330,8 @@ let on_entry acc (entry : _ Traverse.entry) =
     match entry.v with `Contents -> [] | `Inode t -> preds_of_inode acc.dict t
   in
 
-  register_entry acc entry.length current area kind ancestor_cycle_start
-    raw_preds;
+  register_entry ~acc ~length:entry.length ~past:current ~entry_area:area ~kind
+    ~parent_cycle_start:ancestor_cycle_start ~raw_preds;
 
   let preds =
     List.map (fun (step_opt, off) -> (off, past_of_child step_opt)) raw_preds
