@@ -28,7 +28,7 @@
      - Inside single tree
    - space taken by length field
    - which area references which area? (i.e. analysis of pq when changing area)
-   - intersection between trees (put source trees in payload)
+   - intersection between trees (put source trees in parents)
    - number of times an object is referenced
      - Inside single tree
      - Cross tree
@@ -49,6 +49,13 @@ module Intset = Set.Make (struct
 end)
 
 module Int63map = Map.Make (Int63)
+
+type contents_kind =
+  [ `Contents_0_31 | `Contents_128_511 | `Contents_32_127 | `Contents_512_plus ]
+
+type inode_root = [ `Inode_root_tree | `Inode_root_values ]
+type inode_intermediate = [ `Inode_nonroot_tree ]
+type inode_terminal_nonroot = [ `Inode_nonroot_values ]
 
 type kind =
   [ `Contents_0_31
@@ -78,20 +85,24 @@ let dynamic_size_of_step_encoding =
   | Dynamic f -> f
   | Static _ | Unknown -> assert false
 
-let multiple = [ "multiple" ]
+type parents =
+  | Multiple
+  | Single of {
+      stared_path_rev : string list; (* root_inode_length : int option; *)
+    }
 
-let pp_path_prefix_rev ppf l =
-  if l === multiple then Format.fprintf ppf "%s" "multiple"
-  else Format.fprintf ppf "/%s" (l |> List.rev |> String.concat "/")
+let pp_parents ppf = function
+  | Multiple -> Format.fprintf ppf "multiple"
+  | Single { stared_path_rev } ->
+      Format.fprintf ppf "/%s" (stared_path_rev |> List.rev |> String.concat "/")
 
 module D0 = struct
   type k = {
     parent_cycle_start : int;
     entry_area : int;
-    path_prefix_rev : string list;
+    parents : parents;
     kind : kind;
   }
-  [@@deriving repr ~pp]
 
   type v = {
     count : int;
@@ -111,8 +122,8 @@ module D0 = struct
     Hashtbl.iter
       (fun k v ->
         Fmt.str "%d,%d,%a,%a,%d,%d,%d,%d,%d\n" k.parent_cycle_start k.entry_area
-          pp_path_prefix_rev k.path_prefix_rev pp_kind k.kind v.count v.bytes
-          v.indirect_count v.direct_count v.direct_bytes
+          pp_parents k.parents pp_kind k.kind v.count v.bytes v.indirect_count
+          v.direct_count v.direct_bytes
         |> output_string chan)
       tbl;
     close_out chan
@@ -168,8 +179,6 @@ type acc = {
   current_chunk : int63 option;
 }
 
-type payload = { truncated_path_rev : string list }
-
 let blob_encoding_prefix_size = 32 + 1
 
 let kind_of_contents entry_length =
@@ -201,15 +210,24 @@ let kind_of_inode =
     | V1_nonroot { v = Values _; _ } -> `Inode_nonroot_values
     | V1_nonroot { v = Tree _; _ } -> `Inode_nonroot_tree
 
+let node_length_of_entry_exn (entry : _ Traverse.entry) =
+  match entry.v with
+  | `Contents -> assert false
+  | `Inode comp -> (
+      let open Traverse.Inode.Compress in
+      match v_of_compress comp with
+      | Values l -> List.length l
+      | Tree { length; _ } -> length)
+
 let kind_of_entry (entry : _ Traverse.entry) =
   match entry.v with
   | `Contents -> kind_of_contents entry.length
   | `Inode t -> kind_of_inode t
 
-let register_entry acc (entry : _ Traverse.entry) entry_area path_prefix_rev
-    kind parent_cycle_start raw_preds =
+let register_entry acc (entry : _ Traverse.entry) entry_area kind
+    parent_cycle_start raw_preds =
   let open D0 in
-  let k = { parent_cycle_start; entry_area; path_prefix_rev; kind } in
+  let k = { parent_cycle_start; entry_area; parents = entry.payload; kind } in
   let v =
     match Hashtbl.find_opt acc.d0 k with
     | None ->
@@ -240,50 +258,50 @@ let register_entry acc (entry : _ Traverse.entry) entry_area path_prefix_rev
   in
   Hashtbl.replace acc.d0 k v
 
-let cons_rev_path prefix step =
-  assert (step <<>> "*");
-  if prefix === multiple then multiple
-  else if List.length prefix < 2 then step :: prefix
-  else "*" :: prefix
+let build_payload parents step_opt =
+  match parents with
+  | Multiple -> Multiple
+  | Single { stared_path_rev } ->
+      let stared_path_rev =
+        match step_opt with
+        | None -> stared_path_rev
+        | Some (step, (`Direct | `Indirect)) ->
+            assert (step <<>> "*");
+            if List.length stared_path_rev < 2 then step :: stared_path_rev
+            else "*" :: stared_path_rev
+      in
+      Single { stared_path_rev }
 
 let on_entry acc (entry : _ Traverse.entry) =
   let kind = kind_of_entry entry in
   let area = acc.area_of_offset entry.offset in
   let ancestor_cycle_start = acc.ancestor_cycle_start in
   assert (area < ancestor_cycle_start);
-  let prefix = entry.payload.truncated_path_rev in
-  (* let extend_prefix = List.length prefix <= 1 && prefix <<>> multiple in *)
   if acc.entry_count mod 2_000_000 = 0 then
-    Fmt.epr "on_entry: %#d, area:%d, kind:%a, prefix:%a\n%!" acc.entry_count
-      area pp_kind kind pp_path_prefix_rev prefix;
+    Fmt.epr "on_entry: %#d, area:%d, kind:%a, parent_payload:%a\n%!"
+      acc.entry_count area pp_kind kind pp_parents entry.payload;
 
   let raw_preds =
     match entry.v with `Contents -> [] | `Inode t -> preds_of_inode acc.dict t
   in
 
-  register_entry acc entry area prefix kind ancestor_cycle_start raw_preds;
+  register_entry acc entry area kind ancestor_cycle_start raw_preds;
 
+  (* let root_inode_length =
+   *   match (kind, entry.payload.root_inode_length) with
+   *   | #contents_kind, None -> None
+   *   | #contents_kind, Some _ -> assert false
+   *   | #inode_intermediate, Some len -> Some len
+   *   | #inode_intermediate, None -> assert false
+   *   | #inode_root, None -> Some (node_length_of_entry_exn entry)
+   *   | #inode_root, Some _ -> assert false
+   *   | #inode_terminal_nonroot, Some _ -> None
+   *   | #inode_terminal_nonroot, None -> assert false
+   * in *)
   let preds =
     List.map
       (fun (step_opt, off) ->
-        let truncated_path_rev =
-          (* if not extend_prefix then prefix *)
-          (* else *)
-            match step_opt with
-            | None -> prefix
-            | Some (step, (`Direct | `Indirect)) -> (
-                cons_rev_path prefix step
-              (* let path =  in
-               *
-               *   let path = step :: prefix in
-               *   match Hashtbl.find_opt acc.path_sharing path with
-               *   | Some path -> path
-               *   | None ->
-               *       Hashtbl.add acc.path_sharing path path;
-               *       path *)
-                      )
-        in
-        let payload = { truncated_path_rev } in
+        let payload = build_payload entry.payload step_opt in
         (off, payload))
       raw_preds
   in
@@ -348,12 +366,10 @@ let on_read acc ({ first; last } : IO.page_range) =
   ignore (first, last);
   acc
 
-let merge_payloads _off ~older:{ truncated_path_rev = l }
-    ~newer:{ truncated_path_rev = l' } =
-  let truncated_path_rev =
-    if l == l' then l else if l === l' then l else multiple
-  in
-  { truncated_path_rev }
+let merge_payloads _off ~older ~newer =
+  match (older, newer) with
+  | Single _, Single _ when older === newer -> older
+  | _ -> Multiple
 
 let main () =
   Fmt.epr "Hello World\n%!";
@@ -447,10 +463,9 @@ let main () =
             current_chunk = None;
           }
         in
-        let payload = { truncated_path_rev = [] } in
         let acc =
           Traverse.fold path
-            [ (node_off, payload) ]
+            [ (node_off, Single { stared_path_rev = [] }) ]
             ~merge_payloads ~on_entry ~on_chunk ~on_read acc
         in
 

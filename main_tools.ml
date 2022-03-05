@@ -4,9 +4,11 @@ module Maker = Irmin_pack.Maker (Irmin_tezos.Conf)
 module Store = Maker.Make (Irmin_tezos.Schema)
 module IO = Pack_file_ios
 module Traverse = Traverse.Make (Irmin_tezos.Conf) (Irmin_tezos.Schema)
-module Seq_traverse = Sequential_traverse.Make (Irmin_tezos.Conf) (Irmin_tezos.Schema)
 
-    module Dict = Irmin_pack.Dict
+module Seq_traverse =
+  Sequential_traverse.Make (Irmin_tezos.Conf) (Irmin_tezos.Schema)
+
+module Dict = Irmin_pack.Dict
 
 module Key = struct
   include Irmin_pack.Pack_key
@@ -51,12 +53,14 @@ let expand_name dict name =
       | None -> assert false
       | Some s -> (s, `Indirect))
 
-let preds_of_inode dict v =
+let v_of_compress v =
   let open Traverse.Inode.Compress in
-  let v =
-    match v.tv with
-    | V0_stable v | V0_unstable v | V1_root { v; _ } | V1_nonroot { v; _ } -> v
-  in
+  match v.tv with
+  | V0_stable v | V0_unstable v | V1_root { v; _ } | V1_nonroot { v; _ } -> v
+
+let preds_of_inode dict v : ((_ * _) option * int63) list =
+  let open Traverse.Inode.Compress in
+  let v = v_of_compress v in
   match v with
   | Values l ->
       List.map
@@ -98,8 +102,10 @@ let lookup_cycle_starts_in_repo repo =
                 | Direct { offset; _ } -> offset
               in
               let node_offset = root_node_offset_of_commit commit in
-              assert Int63.(node_offset < commit_offset);
-              Fmt.epr "%a, node:%#14d, commit:%#14d\n%!" Cycle_start.pp cycle (Int63.to_int node_offset) (Int63.to_int commit_offset);
+              assert (Int63.(node_offset < commit_offset));
+              Fmt.epr "%a, node:%#14d, commit:%#14d\n%!" Cycle_start.pp cycle
+                (Int63.to_int node_offset)
+                (Int63.to_int commit_offset);
               (cycle, node_offset, commit_offset) :: acc)
             commit_opt
         in
