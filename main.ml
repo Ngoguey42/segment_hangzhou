@@ -55,18 +55,26 @@ type contents_kind =
 
 type inode_root = [ `Inode_root_tree | `Inode_root_values ]
 type inode_nonroot = [ `Inode_nonroot_tree | `Inode_nonroot_values ]
-(* type inode_intermediate = [ `Inode_nonroot_tree ] *)
-(* type inode_terminal_nonroot = [ `Inode_nonroot_values ] *)
+
+type node_length =
+  [ `Na
+  | `Multiple
+  | `Nl_0_32
+  | `Nl_33_256
+  | `Nl_257_2048
+  | `Nl_2049_16384
+  | `Nl_16385_plus ]
+[@@deriving repr ~pp]
 
 type kind =
   [ `Contents_0_31
   | `Contents_128_511
   | `Contents_32_127
   | `Contents_512_plus
-  | `Inode_nonroot_tree
-  | `Inode_nonroot_values
+  | `Inode_root_values
   | `Inode_root_tree
-  | `Inode_root_values ]
+  | `Inode_nonroot_tree
+  | `Inode_nonroot_values ]
 [@@deriving repr ~pp]
 
 type extended_kind =
@@ -86,23 +94,22 @@ let dynamic_size_of_step_encoding =
   | Dynamic f -> f
   | Static _ | Unknown -> assert false
 
-type past_path = [ `Multiple | `Single of string list ]
+type context_path = [ `Multiple | `Single of string list ]
 
-let pp_past_path ppf = function
+let pp_context_path ppf = function
   | `Multiple -> Format.fprintf ppf "multiple"
   | `Single stared_path_rev ->
       Format.fprintf ppf "/%s" (stared_path_rev |> List.rev |> String.concat "/")
 
-(* TODO: past to context *)
-type past = {
-  path : past_path;
+type context = {
+  path : context_path;
   node_length : [ `Outside | `Multiple | `Inside_one of int ];
 }
 
-let pp_past ppf past =
-  pp_past_path ppf past.path;
+let pp_context ppf context =
+  pp_context_path ppf context.path;
   Format.fprintf ppf ",";
-  match past.node_length with
+  match context.node_length with
   | `Multiple -> Format.fprintf ppf "multiple"
   | `Outside -> ()
   | `Inside_one len -> Format.fprintf ppf "%d" len
@@ -111,8 +118,9 @@ module D0 = struct
   type k = {
     parent_cycle_start : int;
     entry_area : int;
-    path : past_path;
+    path : context_path;
     kind : kind;
+    node_length : node_length;
   }
 
   type v = {
@@ -129,12 +137,13 @@ module D0 = struct
   let save tbl =
     let chan = open_out path in
     output_string chan
-      "parent_cycle_start,entry_area,path,kind,count,bytes,indirect_count,direct_count,direct_bytes\n";
+      "parent_cycle_start,entry_area,path,kind,node_lenght,count,bytes,indirect_count,direct_count,direct_bytes\n";
     Hashtbl.iter
       (fun k v ->
-        Fmt.str "%d,%d,%a,%a,%d,%d,%d,%d,%d\n" k.parent_cycle_start k.entry_area
-          pp_past_path k.path pp_kind k.kind v.count v.bytes v.indirect_count
-          v.direct_count v.direct_bytes
+        Fmt.str "%d,%d,%a,%a,%a,%d,%d,%d,%d,%d\n" k.parent_cycle_start
+          k.entry_area pp_context_path k.path pp_kind k.kind pp_node_length
+          k.node_length v.count v.bytes v.indirect_count v.direct_count
+          v.direct_bytes
         |> output_string chan)
       tbl;
     close_out chan
@@ -235,10 +244,23 @@ let kind_of_entry (entry : _ Traverse.entry) =
   | `Contents -> kind_of_contents entry.length
   | `Inode t -> kind_of_inode t
 
-let register_entry ~acc ~length ~(past : past) ~entry_area ~kind
+let register_entry ~acc ~length ~(context : context) ~entry_area ~kind
     ~parent_cycle_start ~raw_preds =
   let open D0 in
-  let k = { parent_cycle_start; entry_area; path = past.path; kind } in
+  let node_length =
+    match context.node_length with
+    | `Multiple -> `Multiple
+    | `Outside -> `Na
+    | `Inside_one len ->
+        if len <= 32 then `Nl_0_32
+        else if len <= 256 then `Nl_33_256
+        else if len <= 2048 then `Nl_257_2048
+        else if len <= 16384 then `Nl_2049_16384
+        else `Nl_16385_plus
+  in
+  let k =
+    { parent_cycle_start; entry_area; path = context.path; kind; node_length }
+  in
   let v =
     match Hashtbl.find_opt acc.d0 k with
     | None ->
@@ -275,29 +297,21 @@ let on_entry acc (entry : _ Traverse.entry) =
   let ancestor_cycle_start = acc.ancestor_cycle_start in
   assert (area < ancestor_cycle_start);
 
-  let past = entry.payload in
+  let context = entry.payload in
   let current =
     let node_length =
-      match (kind, past.node_length) with
+      match (kind, context.node_length) with
       | #contents_kind, `Outside -> `Outside
       | #contents_kind, _ -> assert false
       | #inode_root, `Outside -> `Inside_one (node_length_of_entry_exn entry)
       | #inode_root, _ -> assert false
-      (* | #inode_intermediate, `Multiple -> `Multiple *)
-      (* | #inode_intermediate, `Inside_one len -> `Inside_one len *)
-      (* | #inode_intermediate, `Outside -> assert false *)
-
-      (* | #inode_terminal_nonroot, `Multiple -> `Outside
-       * | #inode_terminal_nonroot, `Inside_one _ -> `Outside
-       * | #inode_terminal_nonroot, `Outside -> assert false *)
       | #inode_nonroot, `Multiple -> `Multiple
       | #inode_nonroot, `Inside_one len -> `Inside_one len
       | #inode_nonroot, `Outside -> assert false
     in
-
-    { past with node_length }
+    { context with node_length }
   in
-  let past_of_child step_opt =
+  let context_of_child step_opt =
     let path =
       match current.path with
       | `Multiple -> `Multiple
@@ -323,18 +337,18 @@ let on_entry acc (entry : _ Traverse.entry) =
   in
 
   if acc.entry_count mod 2_000_000 = 0 then
-    Fmt.epr "on_entry: %#d, area:%d, kind:%a, past:%a current:%a\n%!"
-      acc.entry_count area pp_kind kind pp_past past pp_past current;
+    Fmt.epr "on_entry: %#d, area:%d, kind:%a, context:%a\n%!" acc.entry_count
+      area pp_kind kind pp_context context;
 
   let raw_preds =
     match entry.v with `Contents -> [] | `Inode t -> preds_of_inode acc.dict t
   in
 
-  register_entry ~acc ~length:entry.length ~past:current ~entry_area:area ~kind
-    ~parent_cycle_start:ancestor_cycle_start ~raw_preds;
+  register_entry ~acc ~length:entry.length ~context:current ~entry_area:area
+    ~kind ~parent_cycle_start:ancestor_cycle_start ~raw_preds;
 
   let preds =
-    List.map (fun (step_opt, off) -> (off, past_of_child step_opt)) raw_preds
+    List.map (fun (step_opt, off) -> (off, context_of_child step_opt)) raw_preds
   in
   ({ acc with entry_count = acc.entry_count + 1 }, preds)
 
