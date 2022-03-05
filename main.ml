@@ -3,17 +3,19 @@
     Requires https://github.com/Ngoguey42/irmin/pull/new/expose-compress *)
 
 (*
-   D0 (old d0 + d1):
+   D0:
    Info per pack file entry
 
-   D1 (old d2):
-   Infor per pack file area
+   D1:
+   Truc
+
+   D2:
+   Info per pack file area
 
    about to impl:
-   - Merge d0 and d1
    - Split [Inode_root_tree] given length 33-256, 257-2048, 2049-16384, 16385+
    - Split [Inode_nonroot_tree] and [Inode_nonroot_values] given their
-     root length: 33-256, 257-2048, 2049-16384, 16385+
+     root length: 33-256, 257-2048, 2049-16384, 16385+, multiple
    - Let's record more about paths:
      - The exact names up to len 2, and stars for higher lenghts
      - "/"
@@ -101,49 +103,32 @@ module D0 = struct
   }
   [@@deriving repr ~pp]
 
-  type v = { count : int; bytes : int } [@@deriving repr ~pp]
+  type v = {
+    count : int;
+    bytes : int;
+    indirect_count : int;
+    direct_count : int;
+    direct_bytes : int;
+  }
+  [@@deriving repr ~pp]
 
   let path = "./entries.csv"
 
   let save tbl =
     let chan = open_out path in
     output_string chan
-      "parent_cycle_start,entry_area,path_prefix,kind,count,bytes\n";
+      "parent_cycle_start,entry_area,path_prefix,kind,count,bytes,indirect_count,direct_count,direct_bytes\n";
     Hashtbl.iter
       (fun k v ->
-        Fmt.str "%d,%d,%a,%a,%d,%d\n" k.parent_cycle_start k.entry_area
+        Fmt.str "%d,%d,%a,%a,%d,%d,%d,%d,%d\n" k.parent_cycle_start k.entry_area
           pp_path_prefix_rev k.path_prefix_rev pp_kind k.kind v.count v.bytes
+          v.indirect_count v.direct_count v.direct_bytes
         |> output_string chan)
       tbl;
     close_out chan
 end
 
 module D1 = struct
-  type k = {
-    parent_cycle_start : int;
-    entry_area : int;
-    path_prefix_rev : string list;
-  }
-
-  type v = { indirect_count : int; direct_count : int; direct_bytes : int }
-
-  let path = "./steps.csv"
-
-  let save tbl =
-    let chan = open_out path in
-    output_string chan
-      "parent_cycle_start,entry_area,path_prefix,indirect_count,direct_count,direct_bytes\n";
-    Hashtbl.iter
-      (fun k v ->
-        Fmt.str "%d,%d,%a,%d,%d,%d\n" k.parent_cycle_start k.entry_area
-          pp_path_prefix_rev k.path_prefix_rev v.indirect_count v.direct_count
-          v.direct_bytes
-        |> output_string chan)
-      tbl;
-    close_out chan
-end
-
-module D2 = struct
   type k = { parent_cycle_start : int; entry_area : int }
   type v = { pages_touched : int; chunk_count : int; algo_chunk_count : int }
 
@@ -162,7 +147,7 @@ module D2 = struct
     close_out chan
 end
 
-module D3 = struct
+module D2 = struct
   type k = { area : int; kind : extended_kind }
   type v = { entry_count : int; byte_count : int }
 
@@ -180,14 +165,11 @@ module D3 = struct
     close_out chan
 end
 
-(* TODO: Harmonise the field names between dicts *)
-
 type acc = {
   dict : Dict.t;
   area_of_offset : int63 -> int;
   d0 : (D0.k, D0.v) Hashtbl.t;
   d1 : (D1.k, D1.v) Hashtbl.t;
-  d2 : (D2.k, D2.v) Hashtbl.t;
   path_sharing : (string list, string list) Hashtbl.t;
   (* The last ones should be reset before each traversal *)
   entry_count : int;
@@ -235,39 +217,38 @@ let kind_of_entry (entry : _ Traverse.entry) =
   | `Inode t -> kind_of_inode t
 
 let register_entry acc (entry : _ Traverse.entry) entry_area path_prefix_rev
-    kind parent_cycle_start =
+    kind parent_cycle_start raw_preds =
   let open D0 in
   let k = { parent_cycle_start; entry_area; path_prefix_rev; kind } in
-  match Hashtbl.find_opt acc.d0 k with
-  | None -> Hashtbl.add acc.d0 k { count = 1; bytes = entry.length }
-  | Some { count; bytes } ->
-      Hashtbl.replace acc.d0 k
-        { count = count + 1; bytes = bytes + entry.length }
-
-let register_step acc entry_area path_prefix_rev step mode parent_cycle_start =
-  let open D1 in
-  let k = { parent_cycle_start; entry_area; path_prefix_rev } in
-  let size = dynamic_size_of_step_encoding step in
-  let incr_indirect, incr_direct, incr_direct_bytes =
-    match mode with
-    | `Indirect -> (1, 0, 0)
-    | `Direct -> (0, 1, dynamic_size_of_step_encoding step)
+  let v =
+    match Hashtbl.find_opt acc.d0 k with
+    | None ->
+        {
+          count = 0;
+          bytes = 0;
+          indirect_count = 0;
+          direct_count = 0;
+          direct_bytes = 0;
+        }
+    | Some e -> e
   in
-  match Hashtbl.find_opt acc.d1 k with
-  | None ->
-      Hashtbl.add acc.d1 k
-        {
-          indirect_count = incr_indirect;
-          direct_count = incr_direct;
-          direct_bytes = incr_direct_bytes;
-        }
-  | Some prev ->
-      Hashtbl.replace acc.d1 k
-        {
-          indirect_count = incr_indirect + prev.indirect_count;
-          direct_count = incr_direct + prev.direct_count;
-          direct_bytes = incr_direct_bytes + prev.direct_bytes;
-        }
+  let v = { v with count = v.count + 1; bytes = v.bytes + entry.length } in
+  let v =
+    List.fold_left
+      (fun v -> function
+        | Some (step, `Direct), _off ->
+            let size = dynamic_size_of_step_encoding step in
+            {
+              v with
+              direct_count = v.direct_count + 1;
+              direct_bytes = v.direct_bytes + size;
+            }
+        | Some (_step, `Indirect), _off ->
+            { v with indirect_count = v.indirect_count + 1 }
+        | None, _ -> v)
+      v raw_preds
+  in
+  Hashtbl.replace acc.d0 k v
 
 let on_entry acc (entry : _ Traverse.entry) =
   let kind = kind_of_entry entry in
@@ -280,41 +261,33 @@ let on_entry acc (entry : _ Traverse.entry) =
     Fmt.epr "on_entry: %#d, area:%d, kind:%a, prefix:%a\n%!" acc.entry_count
       area pp_kind kind pp_path_prefix_rev prefix;
 
-  register_entry acc entry area prefix kind ancestor_cycle_start;
+  let raw_preds =
+    match entry.v with `Contents -> [] | `Inode t -> preds_of_inode acc.dict t
+  in
 
-  match entry.v with
-  | `Contents -> ({ acc with entry_count = acc.entry_count + 1 }, [])
-  | `Inode t ->
-      let raw_preds = preds_of_inode acc.dict t in
+  register_entry acc entry area prefix kind ancestor_cycle_start raw_preds;
 
-      List.iter
-        (function
-          | Some (step, ((`Direct | `Indirect) as mode)), _off ->
-              register_step acc area prefix step mode ancestor_cycle_start
-          | None, _off -> ())
-        raw_preds;
-
-      let preds =
-        List.map
-          (fun (step_opt, off) ->
-            let truncated_path_rev =
-              if not extend_prefix then prefix
-              else
-                match step_opt with
-                | None -> prefix
-                | Some (step, (`Direct | `Indirect)) -> (
-                    let path = step :: prefix in
-                    match Hashtbl.find_opt acc.path_sharing path with
-                    | Some path -> path
-                    | None ->
-                        Hashtbl.add acc.path_sharing path path;
-                        path)
-            in
-            let payload = { truncated_path_rev } in
-            (off, payload))
-          raw_preds
-      in
-      ({ acc with entry_count = acc.entry_count + 1 }, preds)
+  let preds =
+    List.map
+      (fun (step_opt, off) ->
+        let truncated_path_rev =
+          if not extend_prefix then prefix
+          else
+            match step_opt with
+            | None -> prefix
+            | Some (step, (`Direct | `Indirect)) -> (
+                let path = step :: prefix in
+                match Hashtbl.find_opt acc.path_sharing path with
+                | Some path -> path
+                | None ->
+                    Hashtbl.add acc.path_sharing path path;
+                    path)
+        in
+        let payload = { truncated_path_rev } in
+        (off, payload))
+      raw_preds
+  in
+  ({ acc with entry_count = acc.entry_count + 1 }, preds)
 
 let on_chunk acc (chunk : Revbuffer.chunk) =
   let first = chunk.offset in
@@ -324,10 +297,10 @@ let on_chunk acc (chunk : Revbuffer.chunk) =
   assert (entry_area = acc.area_of_offset last);
   let parent_cycle_start = acc.ancestor_cycle_start in
   assert (entry_area < parent_cycle_start);
-  let k = D2.{ parent_cycle_start; entry_area } in
-  let v : D2.v =
-    let open D2 in
-    match Hashtbl.find_opt acc.d2 k with
+  let k = D1.{ parent_cycle_start; entry_area } in
+  let v : D1.v =
+    let open D1 in
+    match Hashtbl.find_opt acc.d1 k with
     | None -> { pages_touched = 0; chunk_count = 0; algo_chunk_count = 0 }
     | Some prev -> prev
   in
@@ -364,7 +337,7 @@ let on_chunk acc (chunk : Revbuffer.chunk) =
         else { v with chunk_count = v.chunk_count + 1 }
   in
 
-  Hashtbl.replace acc.d2 k v;
+  Hashtbl.replace acc.d1 k v;
   {
     acc with
     leftmost_page_touched = Some first_page_touched;
@@ -410,7 +383,7 @@ let main () =
   Fmt.epr "\n%!";
   Fmt.epr "First, traverse sequentially the file\n%!";
   let () =
-    let d3 = Hashtbl.create 1_000 in
+    let d2 = Hashtbl.create 1_000 in
     let _, _, offset_to_stop_at = cycle_starts |> List.rev |> List.hd in
     Seq_traverse.fold path () ~on_entry:(fun () off length entry ->
         let left = off in
@@ -418,7 +391,7 @@ let main () =
         assert (Int63.(right <= offset_to_stop_at));
         let area = area_of_offset left in
         assert (area = area_of_offset Int63.(right - one));
-        let open D3 in
+        let open D2 in
         let kind =
           match entry with
           | `Commit -> `Commit
@@ -427,7 +400,7 @@ let main () =
         in
         let k = { area; kind } in
         let v =
-          match Hashtbl.find_opt d3 k with
+          match Hashtbl.find_opt d2 k with
           | None -> { entry_count = 1; byte_count = length }
           | Some prev ->
               {
@@ -435,17 +408,16 @@ let main () =
                 byte_count = prev.byte_count + length;
               }
         in
-        Hashtbl.replace d3 k v;
+        Hashtbl.replace d2 k v;
         (* Fmt.epr "on_entry %#14d, %d, %a, area:%d\n%!" (Int63.to_int off) length
          *   (Repr.pp Irmin_pack.Pack_value.Kind.t)
          *   kind area; *)
         ((), Int63.(right < offset_to_stop_at)));
-    D3.save d3
+    D2.save d2
   in
 
   let d0 = Hashtbl.create 1_000 in
   let d1 = Hashtbl.create 1_000 in
-  let d2 = Hashtbl.create 1_000 in
   let path_sharing = Hashtbl.create 100 in
   let acc =
     {
@@ -453,7 +425,6 @@ let main () =
       area_of_offset;
       d0;
       d1;
-      d2;
       path_sharing;
       entry_count = 0;
       ancestor_cycle_start = 0;
@@ -490,7 +461,6 @@ let main () =
 
   D0.save acc.d0;
   D1.save acc.d1;
-  D2.save acc.d2;
   Fmt.epr "Bye World\n%!";
   Lwt.return_unit
 
