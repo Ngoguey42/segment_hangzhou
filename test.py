@@ -33,7 +33,7 @@
 #  - A simplified version of the following one
 #
 # - Over all trees, how evolves the amount of E/B
-#  - One plot for each indicator,
+#  - One plot for each discriminator,
 #  - In a plot are stacked curve that show the variations of the categories of an indicator
 #
 # - In an "average tree", over distance to commit, what is touched in each area?
@@ -50,122 +50,94 @@
 #   - indirect count vs direct count
 #   - count
 
+
+
 big_dirs = ['/data/big_maps', '/data/contracts', '/data/rolls']
 
 import pandas as pd
-pd.set_option('display.max_rows', 45)
+pd.set_option('display.max_rows', 57)
 pd.set_option('display.float_format', lambda x: '%.2f' % x)
 # pd.describe_option('display')
 
-
+discriminators = 'area_distance_from_origin path kind node_length contents_size'.split(' ')
+indicators = 'count indirect_count direct_count bytes direct_bytes header_bytes other_bytes'.split(' ')
 
 df = pd.read_csv('csv/entries.csv')
+print(df.shape)
+print()
 
 df2 = df.copy()
 
+
+# Add the derived indicators
+df['header_bytes'] = df['count'] * 32
+df['other_bytes'] = df.bytes - df.header_bytes - df.direct_bytes
+print(df.shape)
+print()
+
+
 # Drop the first ~5 cycle stats as they are very close to the snapshot
 df = df[df.parent_cycle_start >= 434]
+print(df.shape)
+print()
+
+# Switch indicators to float
+for c in indicators:
+    df[c] = df[c].astype(float)
 
 # Switch from 'entry_area' to 'area_distance_from_origin'
 df['area_distance_from_origin'] = (df.parent_cycle_start - df.entry_area).clip(0, 5)
 df = df.drop(columns=['entry_area'])
-df = df.groupby(['area_distance_from_origin', 'parent_cycle_start', 'path_prefix', 'kind']).sum().reset_index()
+print(df.shape)
+print()
 
 # Average together all the remaning cycle_starts
-df = df.set_index(['parent_cycle_start', 'path_prefix', 'kind', 'area_distance_from_origin'], verify_integrity=True).groupby(level=[1, 2, 3]).mean().reset_index()
+tree_count = len(set(df.parent_cycle_start))
+print('tree_count', tree_count)
+df = df.groupby(discriminators)[indicators].sum() / tree_count
+df = df.reset_index()
+print(df.shape)
 
-# Make the "root" information disappear
-mapping = {'Contents_0_31': 'Contents_0_31',
- 'Contents_128_511': 'Contents_128_511',
- 'Contents_32_127': 'Contents_32_127',
- 'Contents_512_plus': 'Contents_512_plus',
- 'Inode_nonroot_tree': 'Inode_tree',
- 'Inode_nonroot_values': 'Inode_values',
- 'Inode_root_tree': 'Inode_tree',
- 'Inode_root_values': 'Inode_values'}
-df['kind'] = df['kind'].apply(lambda x: mapping.get(x))
-df = df.groupby(['area_distance_from_origin', 'path_prefix', 'kind']).sum().reset_index()
+d = df[indicators].sum().to_frame().T
+l = []
+for c in indicators:
+    if 'byte' in c:
+        e = c.replace('byte', 'Mbyte')
+        d[e] = d[c] / 1e6
+        del d[c]
+        c = e
+    l.append(c)
+d = d[l].T
+print(d)
 
-
-df0 = df
-# print(df)
-# print()
-# print()
-
-# exit()
-
-
-df = pd.read_csv('csv/steps.csv')
-
-# Drop the first ~5 cycle stats as they are very close to the snapshot
-df = df[df.parent_cycle_start >= 434]
-
-# Switch from 'entry_area' to 'area_distance_from_origin'
-df['area_distance_from_origin'] = (df.parent_cycle_start - df.entry_area).clip(0, 5)
-df = df.drop(columns=['entry_area'])
-df = df.groupby(['area_distance_from_origin', 'parent_cycle_start', 'path_prefix']).sum().reset_index()
-
-# Average together all the remaning cycle_starts
-df = df.set_index(['parent_cycle_start', 'path_prefix', 'area_distance_from_origin'], verify_integrity=True).groupby(level=[1, 2]).mean().reset_index()
-
-# Merge with [df1]
-df['kind'] = 'Inode_values'
-df = df.merge(right=df0, how='outer', on=['path_prefix', 'area_distance_from_origin', 'kind'])
-
-for col in 'indirect_count,direct_count,direct_bytes'.split(','):
-    df[col] = df[col].fillna(0.)
-del df0
-
-# drop all the small path_prefix
-df = df[df.path_prefix.isin(big_dirs)]
-
-# Make "part" a new distriminator
-df['direct_steps'] = df.direct_bytes
-df['hash_headers'] = df['count'] * 32
-df['other'] = df['bytes'] - df.direct_bytes - df.hash_headers
-df = df.drop(columns=['indirect_count', 'direct_count', 'count', 'bytes', 'direct_bytes'])
-df = df.melt(id_vars=['path_prefix', 'kind', 'area_distance_from_origin'], value_vars=['direct_steps', 'hash_headers', 'other'], value_name='bytes', var_name='part')
-
-# df.pivot(index=None, columns=None, values=None)
-
-# pd.set_option('display.max_rows', 100)
-# df1 = df
-print(df.head())
-print(df.tail())
+for c in discriminators:
+    # print(c, len(set(df[c])), set(df[c]))
+    d = df.groupby(c)[indicators].sum().sort_values('bytes')
+    l = []
+    for c in indicators:
+        d[c + '%'] = d[c] / d[c].sum() * 100
+        l += [c + '%']
+        if 'byte' in c:
+            e = c.replace('byte', 'Mbyte')
+            d[e] = d[c] / 1e6
+            del d[c]
+            c = e
+        l.insert(-1, c)
+    d = d[l]
+    print(d)
+    # if len(d) > 40:
+        # raise "super"
 
 
+df3 = df.copy()
 
 
+print()
+print()
 
-
-
-
-
-
-
-
-
-# pd.set_option('display.max_columns', None)  # or 1000
-# pd.set_option('display.max_rows', None)  # or 1000
-# pd.set_option('display.max_colwidth', None)  # or 199
-
-
-# df = df.query('parent_cycle_start == 445')
-# df = df.query('parent_cycle_start == 8')
-# df =  df[df.parent_cycle_start >= 5]
-
-# for k in ["entry_area", "parent_cycle_start", "path_prefix", "kind"]:
-#     d = df.groupby([k])[['count', 'bytes']].sum()
-#     print(d)
-#     print()
-
-
-# for k in ["entry_area", "path_prefix", "kind"]:
-#     d = df.groupby([k, 'parent_cycle_start'])[['count', 'bytes']].sum().groupby(level=[0]).mean()
-#     print(d)
-#     print()
-#     break
-
+df = pd.read_csv('csv/areas.csv')
+print(df.shape)
+print()
 
 
 #

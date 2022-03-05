@@ -13,13 +13,15 @@
    Info per pack file area
 
    missing infos (osef for now):
+   - The number of chunks and pages touched when the distance is <1 (bas si je sais) (bah non je sais pas) (bah si) (non, definitivement)
    - are the steps uniques?
      - Inside single tree
      - Cross tree
    - are the hashes uniques?
      - Inside single tree
      - Cross tree
-   - average relative offset lenghts
+     - Since we only have the "derive from" sharing, that info is already partially known
+   - average relative offset lengths
      - Inside single tree
    - space taken by length field
    - which area references which area? (i.e. analysis of pq when changing area)
@@ -32,6 +34,52 @@
    - I learned that they want to freeze at each cycle. I don't think it
      changes much for the plots, the reader should just consider distance 0
      and distance 1+
+
+
+  small infos learned from areas.csv
+  - 54_882MB (doesn't really correspond to file)
+  - 236.9M entries
+  - 17 areas from 428 to 444
+  - areas 429+ have average 1.3M entries and 3.135MB
+    - area 428 have 206% entries and 150% bytes
+  - all areas have between 8198 and 8204 commits (including the first...)
+
+  smalls infos learned on full df0 (Beware, this does not cover the full file!!!)
+  - 37.1GB total out of 57.5GB or 54.9GB
+  - 296_483_303 entries total
+  -  91_582_806 steps are Indirect while the dict capacity is 100_000
+  - 408_225_829 steps are Direct, they weigh 14.9GB
+
+  smalls infos learned on averaged trees:
+  - 71% bytes inodes
+  - 57% entries inodes
+  - 46% bytes Nl_16385_plus
+  - 36% entries Inode_root_values
+  - 1% entries Tree
+  - 43% bytes /data/big_maps/*/*/*
+  - 2.3GB a tree
+  - 18M entries in a tree
+  - 915MB of direct steps dont 745MB dans /data/big_maps/*/*/*
+  - 584MB of hash header
+  - 781MB in the rest
+  - 6% entries at distance <1 (13% for bytes)
+  - 85% entries at distance 4+ (73% for bytes)
+  - 000.12% of the bytes are reachable from 2 or more paths
+  - "/data/contracts" has "index" and a blob
+    - I didn't know about that extra level
+  - "/data/contracts/index" has 33820/886_966 Inode_nonroot_tree/Inode_nonroot_values which weigh 149MB
+    - The big inode
+  - "/data/contracts/index/*" has 1_946_293 Inode_root_values which weigh 179MB
+    - The 2M directories of length <32
+  - "/data/contracts/index/*/**" has 3.5M objects that use 207MB
+  - "/data/contracts/index/*/**" has 0 indirect steps
+  - "/data/contracts/index/*/**" total:(87MB in direct, 111MB in headers, 86MB in others)
+  - "/data/contracts/index/*/**" has 190MB in contents, 107MB in headers, 82MB in rest
+  - 99% of the indirect steps are in bigmaps
+
+  TODO: Some multiples might be missing because of the star aliasing
+  TODO: When I reason about size of directories I'm not counting the multiples
+  TODO: Let's expand some paths. Either manually or automatically
 
 *)
 open Import
@@ -84,7 +132,7 @@ let dynamic_size_of_step_encoding =
   | Dynamic f -> f
   | Static _ | Unknown -> assert false
 
-type context_path = [ `Multiple | `Single of string list ]
+type context_path = [ `Multiple | `Single of string list ] [@@deriving repr]
 
 let pp_context_path ppf = function
   | `Multiple -> Format.fprintf ppf "multiple"
@@ -95,6 +143,7 @@ type context = {
   path : context_path;
   node_length : [ `Outside | `Multiple | `Inside_one of int ];
 }
+[@@deriving repr]
 
 let pp_context ppf context =
   pp_context_path ppf context.path;
@@ -128,7 +177,7 @@ module D0 = struct
   let save tbl =
     let chan = open_out path in
     output_string chan
-      "parent_cycle_start,entry_area,path,kind,node_lenght,contents_size,count,bytes,indirect_count,direct_count,direct_bytes\n";
+      "parent_cycle_start,entry_area,path,kind,node_length,contents_size,count,bytes,indirect_count,direct_count,direct_bytes\n";
     Hashtbl.iter
       (fun k v ->
         Fmt.str "%d,%d,%a,%a,%a,%a,%d,%d,%d,%d,%d\n" k.parent_cycle_start
@@ -310,6 +359,17 @@ let on_entry acc (entry : _ Traverse.entry) =
     in
     { context with node_length }
   in
+
+  if current.path === `Single [ "index"; "contracts"; "data" ] then (
+    Fmt.epr "\n%!";
+    Fmt.epr "%a\n%!" (Repr.pp context_t) current;
+    Fmt.epr "\n%!";
+    (match entry.v with
+    | `Inode v ->
+        Fmt.epr "%a\n%!" (Repr.pp Main_tools.Traverse.Inode.compress_t) v
+    | `Contents -> assert false);
+    failwith "super");
+
   let context_of_child step_opt =
     let path =
       match current.path with
@@ -320,7 +380,7 @@ let on_entry acc (entry : _ Traverse.entry) =
             | None -> stared_path_rev
             | Some (step, (`Direct | `Indirect)) ->
                 assert (step <<>> "*");
-                if List.length stared_path_rev < 2 then step :: stared_path_rev
+                if List.length stared_path_rev < 3 then step :: stared_path_rev
                 else "*" :: stared_path_rev
           in
           `Single stared_path_rev
@@ -328,7 +388,8 @@ let on_entry acc (entry : _ Traverse.entry) =
     let node_length =
       match (step_opt, current.node_length) with
       | None, `Inside_one len -> `Inside_one len
-      | None, _ -> assert false
+      | None, `Multiple -> `Multiple
+      | None, `Outside -> assert false
       | Some _, (`Multiple | `Inside_one _) -> `Outside
       | Some _, `Outside -> assert false
     in
@@ -445,50 +506,49 @@ let main () =
     closest_cycle_start_on_the_right - 1
   in
 
-  Fmt.epr "\n%!";
-  Fmt.epr "\n%!";
-  Fmt.epr "First, traverse sequentially the file\n%!";
-  let () =
-    let d2 = Hashtbl.create 1_000 in
-    let _, _, offset_to_stop_at = cycle_starts |> List.rev |> List.hd in
-    Seq_traverse.fold path () ~on_entry:(fun () off length entry ->
-        let left = off in
-        let right = Int63.add_distance off length in
-        assert (Int63.(right <= offset_to_stop_at));
-        let area = area_of_offset left in
-        assert (area = area_of_offset Int63.(right - one));
-        let open D2 in
-        let kind, contents_size =
-          match entry with
-          | `Commit -> (`Commit, `Na)
-          | `Contents ->
-              ( `Contents,
-                let len = length - blob_encoding_prefix_size in
-                assert (len >= 0);
-                if len <= 31 then `Cs_0_31
-                else if len <= 127 then `Cs_32_127
-                else if len <= 511 then `Cs_128_511
-                else `Cs_512_plus )
-          | `Inode t -> (kind_of_inode2 t, `Na)
-        in
-        let k = { area; kind; contents_size } in
-        let v =
-          match Hashtbl.find_opt d2 k with
-          | None -> { entry_count = 1; byte_count = length }
-          | Some prev ->
-              {
-                entry_count = prev.entry_count + 1;
-                byte_count = prev.byte_count + length;
-              }
-        in
-        Hashtbl.replace d2 k v;
-        (* Fmt.epr "on_entry %#14d, %d, %a, area:%d\n%!" (Int63.to_int off) length
-         *   (Repr.pp Irmin_pack.Pack_value.Kind.t)
-         *   kind area; *)
-        ((), Int63.(right < offset_to_stop_at)));
-    D2.save d2
-  in
-
+  (* Fmt.epr "\n%!";
+   * Fmt.epr "\n%!";
+   * Fmt.epr "First, traverse sequentially the file\n%!";
+   * let () =
+   *   let d2 = Hashtbl.create 1_000 in
+   *   let _, _, offset_to_stop_at = cycle_starts |> List.rev |> List.hd in
+   *   Seq_traverse.fold path () ~on_entry:(fun () off length entry ->
+   *       let left = off in
+   *       let right = Int63.add_distance off length in
+   *       assert (Int63.(right <= offset_to_stop_at));
+   *       let area = area_of_offset left in
+   *       assert (area = area_of_offset Int63.(right - one));
+   *       let open D2 in
+   *       let kind, contents_size =
+   *         match entry with
+   *         | `Commit -> (`Commit, `Na)
+   *         | `Contents ->
+   *             ( `Contents,
+   *               let len = length - blob_encoding_prefix_size in
+   *               assert (len >= 0);
+   *               if len <= 31 then `Cs_0_31
+   *               else if len <= 127 then `Cs_32_127
+   *               else if len <= 511 then `Cs_128_511
+   *               else `Cs_512_plus )
+   *         | `Inode t -> (kind_of_inode2 t, `Na)
+   *       in
+   *       let k = { area; kind; contents_size } in
+   *       let v =
+   *         match Hashtbl.find_opt d2 k with
+   *         | None -> { entry_count = 1; byte_count = length }
+   *         | Some prev ->
+   *             {
+   *               entry_count = prev.entry_count + 1;
+   *               byte_count = prev.byte_count + length;
+   *             }
+   *       in
+   *       Hashtbl.replace d2 k v;
+   *       (\* Fmt.epr "on_entry %#14d, %d, %a, area:%d\n%!" (Int63.to_int off) length
+   *        *   (Repr.pp Irmin_pack.Pack_value.Kind.t)
+   *        *   kind area; *\)
+   *       ((), Int63.(right < offset_to_stop_at)));
+   *   D2.save d2
+   * in *)
   let d0 = Hashtbl.create 1_000 in
   let d1 = Hashtbl.create 1_000 in
   let path_sharing = Hashtbl.create 100 in
