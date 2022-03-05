@@ -12,11 +12,6 @@
    D2:
    Info per pack file area
 
-   about to impl:
-   - Split [Inode_root_tree] given length 33-256, 257-2048, 2049-16384, 16385+
-   - Split [Inode_nonroot_tree] and [Inode_nonroot_values] given their
-     root length: 33-256, 257-2048, 2049-16384, 16385+, multiple
-
    missing infos (osef for now):
    - are the steps uniques?
      - Inside single tree
@@ -50,9 +45,7 @@ end)
 
 module Int63map = Map.Make (Int63)
 
-type contents_kind =
-  [ `Contents_0_31 | `Contents_128_511 | `Contents_32_127 | `Contents_512_plus ]
-
+type contents_kind = [ `Contents ]
 type inode_root = [ `Inode_root_tree | `Inode_root_values ]
 type inode_nonroot = [ `Inode_nonroot_tree | `Inode_nonroot_values ]
 
@@ -66,11 +59,11 @@ type node_length =
   | `Nl_16385_plus ]
 [@@deriving repr ~pp]
 
+type contents_size = [ `Na | `Cs_0_31 | `Cs_32_127 | `Cs_128_511 | `Cs_512_plus ]
+[@@deriving repr ~pp]
+
 type kind =
-  [ `Contents_0_31
-  | `Contents_128_511
-  | `Contents_32_127
-  | `Contents_512_plus
+  [ `Contents
   | `Inode_root_values
   | `Inode_root_tree
   | `Inode_nonroot_tree
@@ -78,10 +71,7 @@ type kind =
 [@@deriving repr ~pp]
 
 type extended_kind =
-  [ `Contents_0_31
-  | `Contents_128_511
-  | `Contents_32_127
-  | `Contents_512_plus
+  [ `Contents
   | `Inode_nonroot_tree
   | `Inode_nonroot_values
   | `Inode_root_tree
@@ -121,6 +111,7 @@ module D0 = struct
     path : context_path;
     kind : kind;
     node_length : node_length;
+    contents_size : contents_size;
   }
 
   type v = {
@@ -137,13 +128,13 @@ module D0 = struct
   let save tbl =
     let chan = open_out path in
     output_string chan
-      "parent_cycle_start,entry_area,path,kind,node_lenght,count,bytes,indirect_count,direct_count,direct_bytes\n";
+      "parent_cycle_start,entry_area,path,kind,node_lenght,contents_size,count,bytes,indirect_count,direct_count,direct_bytes\n";
     Hashtbl.iter
       (fun k v ->
-        Fmt.str "%d,%d,%a,%a,%a,%d,%d,%d,%d,%d\n" k.parent_cycle_start
+        Fmt.str "%d,%d,%a,%a,%a,%a,%d,%d,%d,%d,%d\n" k.parent_cycle_start
           k.entry_area pp_context_path k.path pp_kind k.kind pp_node_length
-          k.node_length v.count v.bytes v.indirect_count v.direct_count
-          v.direct_bytes
+          k.node_length pp_contents_size k.contents_size v.count v.bytes
+          v.indirect_count v.direct_count v.direct_bytes
         |> output_string chan)
       tbl;
     close_out chan
@@ -169,7 +160,7 @@ module D1 = struct
 end
 
 module D2 = struct
-  type k = { area : int; kind : extended_kind }
+  type k = { area : int; kind : extended_kind; contents_size : contents_size }
   type v = { entry_count : int; byte_count : int }
 
   let path = "./areas.csv"
@@ -179,8 +170,8 @@ module D2 = struct
     output_string chan "area,kind,entry_count,byte_count\n";
     Hashtbl.iter
       (fun k v ->
-        Fmt.str "%d,%a,%d,%d\n" k.area pp_extended_kind k.kind v.entry_count
-          v.byte_count
+        Fmt.str "%d,%a,%a,%d,%d\n" k.area pp_extended_kind k.kind
+          pp_contents_size k.contents_size v.entry_count v.byte_count
         |> output_string chan)
       tbl;
     close_out chan
@@ -200,14 +191,6 @@ type acc = {
 }
 
 let blob_encoding_prefix_size = 32 + 1
-
-let kind_of_contents entry_length =
-  let len = entry_length - blob_encoding_prefix_size in
-  assert (len >= 0);
-  if len <= 31 then `Contents_0_31
-  else if len <= 127 then `Contents_32_127
-  else if len <= 511 then `Contents_128_511
-  else `Contents_512_plus
 
 (* quick and dirty *)
 let kind_of_inode2 =
@@ -240,9 +223,7 @@ let node_length_of_entry_exn (entry : _ Traverse.entry) =
       | Tree { length; _ } -> length)
 
 let kind_of_entry (entry : _ Traverse.entry) =
-  match entry.v with
-  | `Contents -> kind_of_contents entry.length
-  | `Inode t -> kind_of_inode t
+  match entry.v with `Contents -> `Contents | `Inode t -> kind_of_inode t
 
 let register_entry ~acc ~length ~(context : context) ~entry_area ~kind
     ~parent_cycle_start ~raw_preds =
@@ -258,8 +239,26 @@ let register_entry ~acc ~length ~(context : context) ~entry_area ~kind
         else if len <= 16384 then `Nl_2049_16384
         else `Nl_16385_plus
   in
+  let contents_size =
+    match kind with
+    | `Contents ->
+        let len = length - blob_encoding_prefix_size in
+        assert (len >= 0);
+        if len <= 31 then `Cs_0_31
+        else if len <= 127 then `Cs_32_127
+        else if len <= 511 then `Cs_128_511
+        else `Cs_512_plus
+    | _ -> `Na
+  in
   let k =
-    { parent_cycle_start; entry_area; path = context.path; kind; node_length }
+    {
+      parent_cycle_start;
+      entry_area;
+      path = context.path;
+      kind;
+      node_length;
+      contents_size;
+    }
   in
   let v =
     match Hashtbl.find_opt acc.d0 k with
@@ -459,13 +458,20 @@ let main () =
         let area = area_of_offset left in
         assert (area = area_of_offset Int63.(right - one));
         let open D2 in
-        let kind =
+        let kind, contents_size =
           match entry with
-          | `Commit -> `Commit
-          | `Contents -> kind_of_contents length
-          | `Inode t -> kind_of_inode2 t
+          | `Commit -> (`Commit, `Na)
+          | `Contents ->
+              ( `Contents,
+                let len = length - blob_encoding_prefix_size in
+                assert (len >= 0);
+                if len <= 31 then `Cs_0_31
+                else if len <= 127 then `Cs_32_127
+                else if len <= 511 then `Cs_128_511
+                else `Cs_512_plus )
+          | `Inode t -> (kind_of_inode2 t, `Na)
         in
-        let k = { area; kind } in
+        let k = { area; kind; contents_size } in
         let v =
           match Hashtbl.find_opt d2 k with
           | None -> { entry_count = 1; byte_count = length }
