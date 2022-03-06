@@ -1,4 +1,4 @@
-area,kind,entry_count,byte_count
+area,kind,contents_size,entry_count,byte_count
 436,"Contents","Cs_512_plus",17418,337432967
 441,"Inode_nonroot_tree","Na",4699501,1602419415
 434,"Contents","Cs_0_31",2719196,106936412

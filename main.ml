@@ -37,12 +37,12 @@
 
 
   small infos learned from areas.csv
-  - 54_882MB (doesn't really correspond to file)
+  - 54_882MB (stops at last commit observed)
   - 236.9M entries
-  - 17 areas from 428 to 444
-  - areas 429+ have average 1.3M entries and 3.135MB
-    - area 428 have 206% entries and 150% bytes
-  - all areas have between 8198 and 8204 commits (including the first...)
+  - 18 areas from 427 to 444
+  - areas 428+ have average 13.07M entries and 3120.63MB
+    - area 427 have 112% entries and 59% bytes
+  - area 427 has 1 commit (which?) 428-444 have between 8198 and 8204 commits
 
   smalls infos learned on full df0 (Beware, this does not cover the full file!!!)
   - 37.1GB total out of 57.5GB or 54.9GB
@@ -77,10 +77,13 @@
   - "/data/contracts/index/*/**" has 190MB in contents, 107MB in headers, 82MB in rest
   - 99% of the indirect steps are in bigmaps
 
+  small infos learned:
+  - A tree touches most of the pages of the first area (between 89 and 99%)
+  - An area contains roughly as many entries as one tree, but 2x more bytes
+
   TODO: Some multiples might be missing because of the star aliasing
   TODO: When I reason about size of directories I'm not counting the multiples
   TODO: Let's expand some paths. Either manually or automatically
-  TODO: Shift all the block lvls so that we use the first commit of the pack store
 
 *)
 open Import
@@ -217,7 +220,7 @@ module D2 = struct
 
   let save tbl =
     let chan = open_out path in
-    output_string chan "area,kind,entry_count,byte_count\n";
+    output_string chan "area,kind,contents_size,entry_count,byte_count\n";
     Hashtbl.iter
       (fun k v ->
         Fmt.str "%d,%a,%a,%d,%d\n" k.area pp_extended_kind k.kind
@@ -370,7 +373,6 @@ let on_entry acc (entry : _ Traverse.entry) =
    *       Fmt.epr "%a\n%!" (Repr.pp Main_tools.Traverse.Inode.compress_t) v
    *   | `Contents -> assert false);
    *   failwith "super"); *)
-
   let context_of_child step_opt =
     let path =
       match current.path with
@@ -380,9 +382,10 @@ let on_entry acc (entry : _ Traverse.entry) =
             match step_opt with
             | None -> stared_path_rev
             | Some (step, (`Direct | `Indirect)) ->
-                assert (step <<>> "*");
-                if List.length stared_path_rev < 3 then step :: stared_path_rev
-                else "*" :: stared_path_rev
+              assert (step <<>> "*");
+              step :: stared_path_rev
+                (* if List.length stared_path_rev < 3 then step :: stared_path_rev *)
+                (* else "*" :: stared_path_rev *)
           in
           `Single stared_path_rev
     in
@@ -417,11 +420,11 @@ let on_chunk acc (chunk : Revbuffer.chunk) =
   let first = chunk.offset in
   let right = Int63.(add_distance first chunk.length) in
   let last = Int63.(right - one) in
-  let entry_area = acc.area_of_offset first in
-  assert (entry_area = acc.area_of_offset last);
+  let area = acc.area_of_offset first in
+  assert (area = acc.area_of_offset last);
   let parent_cycle_start = acc.ancestor_cycle_start in
-  assert (entry_area < parent_cycle_start);
-  let k = D1.{ parent_cycle_start; entry_area } in
+  assert (area < parent_cycle_start);
+  let k = D1.{ parent_cycle_start; entry_area = area } in
   let v : D1.v =
     let open D1 in
     match Hashtbl.find_opt acc.d1 k with
@@ -436,14 +439,24 @@ let on_chunk acc (chunk : Revbuffer.chunk) =
   (* 1 - Increment pages_touched *)
   let first_page_touched = IO.page_idx_of_offset first in
   let last_page_touched = IO.page_idx_of_offset last in
+  assert (first_page_touched <= last_page_touched);
   let incr_pages_touched =
     match acc.leftmost_page_touched with
     | None -> 1 + Int.distance_exn ~lo:first_page_touched ~hi:last_page_touched
     | Some leftmost_page_touched ->
         assert (first_page_touched <= leftmost_page_touched);
         assert (last_page_touched <= leftmost_page_touched);
-        Int.distance_exn ~lo:first_page_touched ~hi:leftmost_page_touched
+        let progress =
+          Int.distance_exn ~lo:first_page_touched ~hi:leftmost_page_touched
+        in
+        let pages_skiped =
+          if last_page_touched = leftmost_page_touched then 0
+          else
+            Int.distance_exn ~lo:last_page_touched ~hi:leftmost_page_touched - 1
+        in
+        progress - pages_skiped
   in
+
   let v = { v with pages_touched = v.pages_touched + incr_pages_touched } in
 
   (* 2 - Increment algo_chunk_count *)
@@ -506,7 +519,6 @@ let main () =
     in
     closest_cycle_start_on_the_right - 1
   in
-  (* if true then failwith "super"  ; *)
 
   (* Fmt.epr "\n%!";
    * Fmt.epr "\n%!";
@@ -552,6 +564,7 @@ let main () =
    *   D2.save d2
    * in *)
 
+  (* if true then failwith "super"  ; *)
   let d0 = Hashtbl.create 1_000 in
   let d1 = Hashtbl.create 1_000 in
   let path_sharing = Hashtbl.create 100 in

@@ -134,17 +134,49 @@ for c in discriminators:
 df3 = df.copy()
 
 
-d = df2.groupby(['parent_cycle_start', 'entry_area'])[indicators].sum().reset_index().pivot('parent_cycle_start', 'entry_area', 'bytes').fillna(0) / 1_000_000
-print(d)
 
-print()
-print()
+
+
 
 df = pd.read_csv('csv/areas.csv')
 print(df.shape)
 print()
-
-e = df.groupby('area')[['entry_count', 'byte_count']].sum() / 1000000
+df4 = df.copy()
+e = df.groupby('area')[['entry_count', 'byte_count']].sum() / 1_000_000
+e['page_count'] =  e.byte_count * 1e6 / 4096
+print('per area')
 print(e)
+
+
+d = df2.groupby(['parent_cycle_start', 'entry_area'])[indicators].sum().reset_index().pivot('parent_cycle_start', 'entry_area', 'bytes') / 1_000_000
+print('bytes touched')
+print(d)
+print('% bytes touched')
+print(d / e.byte_count.to_frame().T.values * 100)
+print()
+print()
+
+
+f = df2.groupby(['parent_cycle_start', 'entry_area'])[indicators].sum().reset_index().pivot('parent_cycle_start', 'entry_area', 'count') / 1_000_000
+print('entries touched')
+print(f)
+print('% entries touched')
+print(f / e.entry_count.to_frame().T.values * 100)
+print()
+print()
+
+
+
+df = pd.read_csv('csv/memory_layout.csv')
+print(df.shape)
+print()
+
+
+g = df.pivot('parent_cycle_start', 'entry_area', 'pages_touched').fillna(0).astype(int)
+print('pages touched')
+print(g)
+print('% pages touched')
+print(g / e.page_count.to_frame().T.values * 100)
+
 
 #
