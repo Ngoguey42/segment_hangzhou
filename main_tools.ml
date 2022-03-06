@@ -110,6 +110,9 @@ let lookup_cycle_starts_in_repo repo =
             commit_opt
         in
         Lwt.return acc)
-      [] Cycle_start.all
+      []
+      (match loc with
+      | `Com -> Cycle_start.all_cycle_seconds
+      | `Home -> Cycle_start.all_cycle_firsts)
   in
   List.rev l

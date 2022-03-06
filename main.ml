@@ -80,6 +80,7 @@
   TODO: Some multiples might be missing because of the star aliasing
   TODO: When I reason about size of directories I'm not counting the multiples
   TODO: Let's expand some paths. Either manually or automatically
+  TODO: Shift all the block lvls so that we use the first commit of the pack store
 
 *)
 open Import
@@ -360,15 +361,15 @@ let on_entry acc (entry : _ Traverse.entry) =
     { context with node_length }
   in
 
-  if current.path === `Single [ "index"; "contracts"; "data" ] then (
-    Fmt.epr "\n%!";
-    Fmt.epr "%a\n%!" (Repr.pp context_t) current;
-    Fmt.epr "\n%!";
-    (match entry.v with
-    | `Inode v ->
-        Fmt.epr "%a\n%!" (Repr.pp Main_tools.Traverse.Inode.compress_t) v
-    | `Contents -> assert false);
-    failwith "super");
+  (* if current.path === `Single [ "index"; "contracts"; "data" ] then (
+   *   Fmt.epr "\n%!";
+   *   Fmt.epr "%a\n%!" (Repr.pp context_t) current;
+   *   Fmt.epr "\n%!";
+   *   (match entry.v with
+   *   | `Inode v ->
+   *       Fmt.epr "%a\n%!" (Repr.pp Main_tools.Traverse.Inode.compress_t) v
+   *   | `Contents -> assert false);
+   *   failwith "super"); *)
 
   let context_of_child step_opt =
     let path =
@@ -505,6 +506,7 @@ let main () =
     in
     closest_cycle_start_on_the_right - 1
   in
+  (* if true then failwith "super"  ; *)
 
   (* Fmt.epr "\n%!";
    * Fmt.epr "\n%!";
@@ -549,6 +551,7 @@ let main () =
    *       ((), Int63.(right < offset_to_stop_at)));
    *   D2.save d2
    * in *)
+
   let d0 = Hashtbl.create 1_000 in
   let d1 = Hashtbl.create 1_000 in
   let path_sharing = Hashtbl.create 100 in

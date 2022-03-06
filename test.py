@@ -42,13 +42,15 @@
 #
 # - Over all trees, how many pages of data are needed to be read
 #
+# - three 2d grids, y=pack file area, x=which tree
+#   - cells:
+#     1. txt:how many entries, txt+shape:% of area entries
+#     1. txt:how many bytes, txt+shape:% of area bytes
+#     1. txt:how many pages, txt+shape:% of area pages
 #
 #
 #
-# - Maybe section on data that I dropped
-#   - the root stuff
-#   - indirect count vs direct count
-#   - count
+#
 
 
 
@@ -66,8 +68,6 @@ df = pd.read_csv('csv/entries.csv')
 print(df.shape)
 print()
 
-df2 = df.copy()
-
 
 # Add the derived indicators
 df['header_bytes'] = df['count'] * 32
@@ -75,6 +75,8 @@ df['other_bytes'] = df.bytes - df.header_bytes - df.direct_bytes
 print(df.shape)
 print()
 
+
+df2 = df.copy()
 
 # Drop the first ~5 cycle stats as they are very close to the snapshot
 df = df[df.parent_cycle_start >= 434]
@@ -132,6 +134,9 @@ for c in discriminators:
 df3 = df.copy()
 
 
+d = df2.groupby(['parent_cycle_start', 'entry_area'])[indicators].sum().reset_index().pivot('parent_cycle_start', 'entry_area', 'bytes').fillna(0) / 1_000_000
+print(d)
+
 print()
 print()
 
@@ -139,5 +144,7 @@ df = pd.read_csv('csv/areas.csv')
 print(df.shape)
 print()
 
+e = df.groupby('area')[['entry_count', 'byte_count']].sum() / 1000000
+print(e)
 
 #
