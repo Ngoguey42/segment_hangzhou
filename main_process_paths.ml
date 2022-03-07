@@ -41,21 +41,33 @@ let () =
     | ["multiple"]->"multiple"
     | ["";""]->"/"
     | ["";"protocol"]->"/protocol"
+    | ["";"data"]->"/data"
+    | ["";"data";"cache"]->"/data/cache"
+    | ["";"data";"cache";_]->"/data/cache/*"
+    | ["";"data";"cache";_;"limit"] -> "/data/cache/*/limit"
+    | ["";"data";"version"]->"/data/version"
+    | ["";"data";"v1"]->"/data/v1"
+    | ["";"data";"v1";"cycle_eras"]->"/data/v1/cycle_eras"
+    | ["";"data";"v1";"constants"]->"/data/v1/constants"
+    | ["";"data";"domain"]->"/data/domain"
+    | ["";"data";"liquidity_baking_escape_ema"]->"/data/liquidity_baking_escape_ema"
+    | ["";"data";"liquidity_baking_cpmm_address"]->"/data/liquidity_baking_cpmm_address"
+    | ["";"data";"commitments"]->"/data/commitments"
+    | ["";"data";"commitments";_]->"/data/commitments/*"
 
     | ["";"data";"cycle"]->"/data/cycle"
     | ["";"data";"cycle";_]->"/data/cycle/*"
     | ["";"data";"cycle";_;"random_seed"]->"/data/cycle/*/random_seed"
+    | ["";"data";"cycle";_;"nonces"]->"/data/cycle/*/nonces"
     | ["";"data";"cycle";_;"nonces";_]->"/data/cycle/*/nonces/*"
     | ["";"data";"cycle";_;"last_roll"]->"/data/cycle/*/last_roll"
-
-    | ["";"data";"commitments"]->"/data/commitments"
-    | ["";"data";"commitments";_]->"/data/commitments/*"
 
     | ["";"data";"rolls"]->"/data/rolls"
     | ["";"data";"rolls";"index"]->"/data/rolls/index"
     | ["";"data";"rolls";"limbo"]->"/data/rolls/limbo"
     | ["";"data";"rolls";"index";_]->"/data/rolls/index/*"
     | ["";"data";"rolls";"index";_;"successor"]->"/data/rolls/index/*/successor"
+    | ["";"data";"rolls";"owner"]->"/data/rolls/owner"
     | ["";"data";"rolls";"owner";"current"]->"/data/rolls/owner/current"
     | ["";"data";"rolls";"owner";"snapshot"]->"/data/rolls/owner/snapshot"
     | ["";"data";"rolls";"owner";"snapshot";_]->"/data/rolls/owner/snapshot/*"
@@ -72,8 +84,14 @@ let () =
     | ["";"data";"big_maps";"index";_;"total_bytes"]->"/data/big_maps/index/*/total_bytes"
     | ["";"data";"big_maps";"index";_;"contents";_;"data"]->"/data/big_maps/index/*/contents/*/data"
 
+    | ["";"data";"contracts"]->"/data/contracts"
+    | ["";"data";"contracts";"global_counter"]->"/data/contracts/global_counter"
     | ["";"data";"contracts";"index"]->"/data/contracts/index"
     | ["";"data";"contracts";"index";_]->"/data/contracts/index/*"
+    | ["";"data";"contracts";"index";_;"data"]->"/data/contracts/index/*/data"
+    | ["";"data";"contracts";"index";_;"data";"code"]->"/data/contracts/index/*/data/code"
+    | ["";"data";"contracts";"index";_;"data";"storage"]->"/data/contracts/index/*/data/storage"
+
     | ["";"data";"contracts";"index";_;"frozen_balance"]->"/data/contracts/index/*/frozen_balance"
     | ["";"data";"contracts";"index";_;"frozen_balance";_]->"/data/contracts/index/*/frozen_balance/*"
     | ["";"data";"contracts";"index";_;"frozen_balance";_;"deposits"]->"/data/contracts/index/*/frozen_balance/*/deposits"
@@ -87,16 +105,12 @@ let () =
     | ["";"data";"contracts";"index";_;"counter"]->"/data/contracts/index/*/counter"
     | ["";"data";"contracts";"index";_;"balance"]->"/data/contracts/index/*/balance"
     | ["";"data";"contracts";"index";_;"len"]->"/data/contracts/index/*/len"
-    | ["";"data";"contracts";"index";_;"data"]->"/data/contracts/index/*/data"
     | ["";"data";"contracts";"index";_;"delegated"]->"/data/contracts/index/*/delegated"
     | ["";"data";"contracts";"index";_;"used_bytes"]->"/data/contracts/index/*/used_bytes"
     | ["";"data";"contracts";"index";_;"paid_bytes"]->"/data/contracts/index/*/paid_bytes"
     | ["";"data";"contracts";"index";_;"roll_list"]->"/data/contracts/index/*/roll_list"
     | ["";"data";"contracts";"index";_;"change"]->"/data/contracts/index/*/change"
     | ["";"data";"contracts";"index";_;"delegate"]->"/data/contracts/index/*/delegate"
-
-    | ["";"data";"contracts";"index";_;"data";"code"]->"/data/contracts/index/*/data/code"
-    | ["";"data";"contracts";"index";_;"data";"storage"]->"/data/contracts/index/*/data/storage"
 
     | ["";"data";"sapling"]->"/data/sapling/index"
     | ["";"data";"sapling";"index"]->"/data/sapling/index"
@@ -113,24 +127,39 @@ let () =
     | ["";"data";"sapling";"index";_;"commitments"]->"/data/sapling/index/*/commitments"
     | ["";"data";"sapling";"index";_;"commitments";_]->"/data/sapling/index/*/commitments/*"
     | ["";"data";"sapling";"index";_;"commitments";_;"data"]->"/data/sapling/index/*/commitments/*/data"
+    | ["";"data";"sapling";"index";_;"commitments_size"] -> "/data/sapling/index/*/commitments_size"
 
-    | ["";"data";"active_delegates_with_rolls";"p256"]->"/data/active_delegates_with_rolls/p256"
-    | ["";"data";"active_delegates_with_rolls";"ed25519"]->"/data/active_delegates_with_rolls/ed25519"
-    | ["";"data";"delegates_with_frozen_balance";_;"ed25519"]->"/data/delegates_with_frozen_balance/*/ed25519"
-    | ["";"data";"delegates_with_frozen_balance";_;"secp256k1"]->"/data/delegates_with_frozen_balance/*/secp256k1"
-    | ["";"data";"delegates_with_frozen_balance";_;"p256"]->"/data/delegates_with_frozen_balance/*/p256"
-
-    | ["";"data";"delegates"]->"/data/delegates"
-    | ["";"data";"delegates";"ed25519"]->"/data/delegates/ed25519"
-    | ["";"data";"cache";_]->"/data/cache/*"
+    | ["";"data";"votes"]->"/data/votes"
+    | ["";"data";"votes";"proposals"]->"/data/votes/proposals"
+    | ["";"data";"votes";"proposals";_]->"/data/votes/proposals/*"
+    | ["";"data";"votes";"proposals";_;"ed25519"]->"/data/votes/proposals/*/ed25519"
+    | ["";"data";"votes";"proposals_count"]->"/data/votes/proposals_count"
+    | ["";"data";"votes";"proposals_count";"p256"] -> "/data/votes/proposals_count/p256"
     | ["";"data";"votes";"proposals_count";"secp256k1"]->"/data/votes/proposals_count/secp256k1"
     | ["";"data";"votes";"listings"]->"/data/votes/listings"
     | ["";"data";"votes";"listings"; "p256"]->"/data/votes/listings/p256"
-    | ["";"data";"v1";"cycle_eras"]->"/data/v1/cycle_eras"
-    | ["";"data";"v1";"constants"]->"/data/v1/constants"
-    | ["";"data";"domain"]->"/data/domain"
+    | ["";"data";"votes";"listings"; "ed25519"]->"/data/votes/listings/ed25519"
+    | ["";"data";"votes";"listings"; "secp256k1"]->"/data/votes/listings/secp256k1"
+    | ["";"data";"votes";"ballots";"ed25519"] -> "/data/votes/ballots/ed25519"
+    | ["";"data";"votes";"current_period"] -> "/data/votes/current_period"
+    | ["";"data";"votes";"current_proposal"] -> "/data/votes/current_proposal"
 
-    | _ -> Fmt.failwith "Unkown pattern %s" l
+    | ["";"data";"active_delegates_with_rolls"]->"/data/active_delegates_with_rolls"
+    | ["";"data";"active_delegates_with_rolls";"p256"]->"/data/active_delegates_with_rolls/p256"
+    | ["";"data";"active_delegates_with_rolls";"ed25519"]->"/data/active_delegates_with_rolls/ed25519"
+    | ["";"data";"active_delegates_with_rolls";"secp256k1"]->"/data/active_delegates_with_rolls/secp256k1"
+    | ["";"data";"delegates_with_frozen_balance"]->"/data/delegates_with_frozen_balance"
+    | ["";"data";"delegates_with_frozen_balance";_]->"/data/delegates_with_frozen_balance/*"
+    | ["";"data";"delegates_with_frozen_balance";_;"ed25519"]->"/data/delegates_with_frozen_balance/*/ed25519"
+    | ["";"data";"delegates_with_frozen_balance";_;"secp256k1"]->"/data/delegates_with_frozen_balance/*/secp256k1"
+    | ["";"data";"delegates_with_frozen_balance";_;"p256"]->"/data/delegates_with_frozen_balance/*/p256"
+    | ["";"data";"delegates"]->"/data/delegates"
+    | ["";"data";"delegates";"ed25519"]->"/data/delegates/ed25519"
+    | ["";"data";"delegates";"secp256k1"]->"/data/delegates/secp256k1"
+    | ["";"data";"delegates";"p256"]->"/data/delegates/p256"
+
+    | _ -> Fmt.epr "\033[31mUnkown pattern %s\033[0m\n%!" l; "lol"
+    (* | _ -> Fmt.failwith "Unkown pattern %s" l *)
     in
        (match Hashtbl.find_opt occs k with
        | None -> Hashtbl.add occs k 1
@@ -145,11 +174,10 @@ let () =
   close_in chan;
   Fmt.epr "closed\n%!";
 
-  Hashtbl.iter  (fun k v ->
+  Hashtbl.to_seq occs |> List.of_seq |> List.sort compare |> List.iter
+  (fun (k, v) ->
    Fmt.epr "%#10d %s\n%!" v k;
-
-
-    ) occs;
+    );
 
   ()
 [@@ocamlformat "disable=true"]

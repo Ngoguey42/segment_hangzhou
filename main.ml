@@ -29,6 +29,8 @@
    - number of times an object is referenced
      - Inside single tree
      - Cross tree
+   - stats on what's not kept within an area, would need to perform a single
+     traversal of all commits.
 
   thoughts:
    - I learned that they want to freeze at each cycle. I don't think it
@@ -136,12 +138,11 @@ let dynamic_size_of_step_encoding =
   | Dynamic f -> f
   | Static _ | Unknown -> assert false
 
-type context_path = [ `Multiple | `Single of string list ] [@@deriving repr]
+type context_path = [ `Multiple | `Single of string ] [@@deriving repr]
 
 let pp_context_path ppf = function
   | `Multiple -> Format.fprintf ppf "multiple"
-  | `Single stared_path_rev ->
-      Format.fprintf ppf "/%s" (stared_path_rev |> List.rev |> String.concat "/")
+  | `Single s -> Format.fprintf ppf "%s" s
 
 type context = {
   path : context_path;
@@ -235,7 +236,7 @@ type acc = {
   area_of_offset : int63 -> int;
   d0 : (D0.k, D0.v) Hashtbl.t;
   d1 : (D1.k, D1.v) Hashtbl.t;
-  path_sharing : (string list, string list) Hashtbl.t;
+  (* path_sharing : (string list, string list) Hashtbl.t; *)
   (* The last ones should be reset before each traversal *)
   entry_count : int;
   ancestor_cycle_start : int;
@@ -377,17 +378,14 @@ let on_entry acc (entry : _ Traverse.entry) =
     let path =
       match current.path with
       | `Multiple -> `Multiple
-      | `Single stared_path_rev ->
-          let stared_path_rev =
+      | `Single path ->
+          let path =
             match step_opt with
-            | None -> stared_path_rev
+            | None -> path
             | Some (step, (`Direct | `Indirect)) ->
-              assert (step <<>> "*");
-              step :: stared_path_rev
-                (* if List.length stared_path_rev < 3 then step :: stared_path_rev *)
-                (* else "*" :: stared_path_rev *)
+              shorten_path (path ^ "/" ^ step)
           in
-          `Single stared_path_rev
+          `Single path
     in
     let node_length =
       match (step_opt, current.node_length) with
@@ -567,14 +565,14 @@ let main () =
   (* if true then failwith "super"  ; *)
   let d0 = Hashtbl.create 1_000 in
   let d1 = Hashtbl.create 1_000 in
-  let path_sharing = Hashtbl.create 100 in
+  (* let path_sharing = Hashtbl.create 100 in *)
   let acc =
     {
       dict;
       area_of_offset;
       d0;
       d1;
-      path_sharing;
+      (* path_sharing; *)
       entry_count = 0;
       ancestor_cycle_start = 0;
       leftmost_page_touched = None;
@@ -598,7 +596,7 @@ let main () =
         in
         let acc =
           Traverse.fold path
-            [ (node_off, { path = `Single []; node_length = `Outside }) ]
+            [ (node_off, { path = `Single ""; node_length = `Outside }) ]
             ~merge_payloads ~on_entry ~on_chunk ~on_read acc
         in
 
