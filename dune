@@ -9,10 +9,3 @@
 )
  (preprocess (pps ppx_repr))
 )
-
-; (executable
-; (name main_process_paths)
-; (libraries unix mtime mtime.clock.os fmt irmin-tezos optint progress repr ppx_repr
-; )
-;  (preprocess (pps ppx_repr))
-; )

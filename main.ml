@@ -20,17 +20,21 @@
    - are the hashes uniques?
      - Inside single tree
      - Cross tree
-     - Since we only have the "derive from" sharing, that info is already partially known
    - average relative offset lengths
      - Inside single tree
    - space taken by length field
    - which area references which area? (i.e. analysis of pq when changing area)
-   - intersection between trees (put source trees in parents)
+   - intersection between trees (I know that!)
    - number of times an object is referenced
      - Inside single tree
      - Cross tree
    - stats on what's not kept within an area, would need to perform a single
      traversal of all commits.
+   - Distribution of length in direct steps
+   - in full file, infos on steps
+   TODO: Some multiples might be missing because of the star aliasing
+   TODO: When I reason about size of directories I'm not counting the multiples
+   TODO: "/" is missing from paths...
 
   thoughts:
    - I learned that they want to freeze at each cycle. I don't think it
@@ -57,35 +61,31 @@
   - 57% entries inodes
   - 46% bytes Nl_16385_plus
   - 36% entries Inode_root_values
-  - 1% entries Tree
+  - 1% entries Tree [?]
   - 43% bytes /data/big_maps/*/*/*
   - 2.3GB a tree
   - 18M entries in a tree
-  - 915MB of direct steps dont 745MB dans /data/big_maps/*/*/*
-  - 584MB of hash header
-  - 781MB in the rest
+  - 915MB of direct steps dont 745MB dans /data/big_maps/*/*/* [?]
+  - 584MB of hash header [?]
+  - 781MB in the rest [?]
   - 6% entries at distance <1 (13% for bytes)
   - 85% entries at distance 4+ (73% for bytes)
   - 000.12% of the bytes are reachable from 2 or more paths
-  - "/data/contracts" has "index" and a blob
-    - I didn't know about that extra level
-  - "/data/contracts/index" has 33820/886_966 Inode_nonroot_tree/Inode_nonroot_values which weigh 149MB
-    - The big inode
+  - "/data/contracts/index" has 33_820/886_966 Inode_nonroot_tree/Inode_nonroot_values which weigh 149MB
   - "/data/contracts/index/*" has 1_946_293 Inode_root_values which weigh 179MB
-    - The 2M directories of length <32
   - "/data/contracts/index/*/**" has 3.5M objects that use 207MB
-  - "/data/contracts/index/*/**" has 0 indirect steps
-  - "/data/contracts/index/*/**" total:(87MB in direct, 111MB in headers, 86MB in others)
-  - "/data/contracts/index/*/**" has 190MB in contents, 107MB in headers, 82MB in rest
-  - 99% of the indirect steps are in bigmaps
+  - "/data/contracts/index/*/**" has 0 indirect steps [?]
+  - "/data/contracts/index/*/**" total:(87MB in direct, 111MB in headers, 86MB in others) [?]
+  - "/data/contracts/index/*/**" has 190MB in contents, 107MB in headers, 82MB in rest [?]
+  - 99% of the indirect steps are in bigmaps [?]
 
   small infos learned:
   - A tree touches most of the pages of the first area (between 89 and 99%)
   - An area contains roughly as many entries as one tree, but 2x more bytes
+  - There are massive directories in [/data/big_maps/index/*/contents]
+    - 58 inode trees with 11_017_653 steps, (10_796_975 which are direct and that take 701_803_429 byte)
 
-  TODO: Some multiples might be missing because of the star aliasing
-  TODO: When I reason about size of directories I'm not counting the multiples
-  TODO: Let's expand some paths. Either manually or automatically
+
 
 *)
 open Import
