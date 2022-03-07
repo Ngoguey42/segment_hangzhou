@@ -11,6 +11,7 @@ pd.set_option('display.float_format', lambda x: '%.2f' % x)
 def on_averaged_tree(df, fname, block_desc, block_subdesc, filter_name=None):
     nb = nbf.v4.new_notebook()
     cells = []
+    df.to_csv(f'/tmp/{fname}.csv', index=False)
 
     # **************************************************************************
     if filter_name is None:
@@ -18,13 +19,13 @@ def on_averaged_tree(df, fname, block_desc, block_subdesc, filter_name=None):
     else:
         a = f'##### {filter_name}'
     print(filter_name, a)
-    text = f"""\
+    cell = f"""\
 # Analysis of the Irmin tree of {block_desc}
 ### which is {block_subdesc}
 
 {a}
 """
-    cells.append(nbf.v4.new_markdown_cell(text))
+    cells.append(nbf.v4.new_markdown_cell(cell))
 
     # **************************************************************************
     d = df[indicators].sum()
@@ -35,8 +36,8 @@ def on_averaged_tree(df, fname, block_desc, block_subdesc, filter_name=None):
         a = " (i.e. number of children in the nodes)"
         b = ""
 
-    text = f"""\
-##### Summary
+    cell = f"""\
+### Summary
 ```
 Number of bytes: {int(d.loc['bytes']):,d}. Breakdown:
   - {float(d.loc['header_bytes'] / d.loc['bytes']):4.0%} {int(d.loc['header_bytes']):>11,d}B in 32 byte hash of objects,
@@ -55,10 +56,21 @@ Number of steps: {int(d.loc['step_count']):,d}{a}. Breakdown:
 {b}
 
 """
-    print(text)
-    cells.append(nbf.v4.new_markdown_cell(text))
+    print(cell)
+    cells.append(nbf.v4.new_markdown_cell(cell))
 
     # **************************************************************************
+    cell = f"""\
+%matplotlib inline
+import custom_plot_tools
+
+custom_plot_tools.plot_vertical_bubble_histo(
+    '/tmp/{fname}.csv',
+    discriminator='ekind',
+)
+
+"""
+    cells.append(nbf.v4.new_code_cell(cell))
 
 
 
@@ -78,6 +90,7 @@ df['path'] = df.path.fillna('/')
 # Add the derived discriminators
 df['path2'] = df.path.apply(lambda x: path_pats[x][0])
 df['path3'] = df.path.apply(lambda x: path_pats[x][1])
+df['ekind'] = df.apply(lambda row: row.contents_size if row.contents_size != "Na" else row.node_length, axis=1)
 
 # Add the derived indicators
 df['header_bytes'] = df['count'] * 32
@@ -103,12 +116,15 @@ df = df.drop(columns=['entry_area'])
 # df = df.groupby(discriminators)[indicators].sum() / tree_count
 # df = df.reset_index()
 
+# d = df.set_index('parent_cycle_start').loc[445].reset_index(drop=True)
 # on_averaged_tree(
-#     df.set_index('parent_cycle_start').loc[445],
+#     d,
 #     block_desc="block level 2_002_944 which is the second block of cycle 438",
+#     block_subdesc="the second block of cycle 438 (created on Jan 4, 2022)",
 #     fname='average_tree.ipynb',
 # )
-d = df.set_index('parent_cycle_start').loc[445].query('path3 == "/data/contracts/index/*"')
+
+d = df.set_index('parent_cycle_start').loc[445].query('path3 == "/data/contracts/index/*"').reset_index(drop=True)
 on_averaged_tree(
     d,
     block_desc="block level 2_002_944",
