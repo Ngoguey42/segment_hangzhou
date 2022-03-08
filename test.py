@@ -22,9 +22,6 @@
 # - In an "average tree", 1d break down
 #   - #roots/#entries/#bytes (3 pies or 1 vertical bubble list with 3 cols)
 #   - For each indicator.
-#     - Kind2
-#     - Contents_size4
-#     - Node_length5
 #     - Kind9
 #     - Distance from commit5
 #     - Path4

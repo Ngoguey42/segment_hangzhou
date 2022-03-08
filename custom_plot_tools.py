@@ -58,25 +58,22 @@ rows = {
         'the rest': 'the rest',
     },
     'path3': {
-        '/data/big_maps/index/*/contents': '/data/big_maps/index/*/contents',
-        '/data/big_maps/index/*/contents/*': '/data/big_maps/index/*/contents/*',
-        '/data/big_maps/index/*/contents/*/data': '/data/big_maps/index/*/contents/*/data',
         '/data/contracts/index': '/data/contracts/index',
         '/data/contracts/index/*': '/data/contracts/index/*',
         '/data/contracts/index/*/manager': '/data/contracts/index/*/manager',
         '/data/contracts/index/*/<the rest>': '/data/contracts/index/*/<the rest>',
+        '/data/big_maps/index/*/contents': '/data/big_maps/index/*/contents',
+        '/data/big_maps/index/*/contents/*': '/data/big_maps/index/*/contents/*',
+        '/data/big_maps/index/*/contents/*/data': '/data/big_maps/index/*/contents/*/data',
         'the rest': 'the rest',
     },
 }
 
-# plt.rcParams['font.family'] = 'serif'
-# plt.rcParams['font.serif'] = 'Ubuntu'
-# plt.rcParams['font.monospace'] = 'Ubuntu Mono'
-
 discriminator = 'ekind'
 
+csv_path = '/tmp/tree_of_cycle_445_contracts-index-star-manager.ipynb.csv'
 # csv_path = '/tmp/average_tree.ipynb.csv'
-# discriminator = 'path2'
+discriminator = 'ekind'
 # if True:
 def plot_vertical_bubble_histo(csv_path, discriminator):
     df = pd.read_csv(csv_path)
@@ -98,7 +95,7 @@ def plot_vertical_bubble_histo(csv_path, discriminator):
     ]
     yborder = 0.2
     xborder = 0.4
-    xshift = 1.1
+    xshift = 1.3
     xs = [
         xborder + 0.5,
         xborder + 0.5 + xshift * 1,
@@ -111,24 +108,14 @@ def plot_vertical_bubble_histo(csv_path, discriminator):
     ]
 
     if discriminator != 'path':
-        figsize = np.asarray([5.5, 5.5])
+        figsize = np.asarray([6, 6])
     else:
         figsize = np.asarray([5.5, 50])
     fontsize_out=8.5
     fontsize_small=6
     fontsize=6.5
     fontstuff = dict(
-        # fontweight="ultralight",
-        # fontstyle='italic',
-        # fontfamily = 'sans-serif',
         fontweight='semibold',
-        # fontfamily = 'serif',
-        # fontvariant='small-caps',
-        # fontfamily = 'monospace',
-        # fontproperties='Ubuntu',
-        # fontproperties='Ubuntu Mono',
-        # fontserif = 'Ubuntu',
-        # fontmonospace = 'Ubuntu Mono',
     )
     if 'path' in discriminator:
         xaxis_fontstuff = dict(
@@ -136,21 +123,13 @@ def plot_vertical_bubble_histo(csv_path, discriminator):
         )
     else:
         xaxis_fontstuff = {}
-    # print(fontstuff)
 
     plt.close('all')
-    # figsize = np.asarray([len(cols), len(L)]) * 2
-
-    # print('figsize', figsize)
     fig, ax = plt.subplots(
-        # nrows=3,
         subplot_kw=dict(aspect="equal"),
         dpi=100,
         figsize=figsize,
-        # gridspec_kw = {'wspace':0, 'hspace':0},
-        # constrained_layout=True,
     )
-
 
     max_area = np.pi * 0.5 ** 2
     min_area = 0.15 / 100
@@ -159,6 +138,8 @@ def plot_vertical_bubble_histo(csv_path, discriminator):
         fmt = fmt(df[col])
 
         total = df[col].sum()
+        if total == 0: continue
+
         d = df[col].to_frame()
         d['pct'] = d[col] / total
 
@@ -170,7 +151,6 @@ def plot_vertical_bubble_histo(csv_path, discriminator):
         )
         d['rad'] = (d.area / np.pi) ** 0.5
         d['x'] = x
-        # print(d)
 
         ys = []
         for y, ekind in enumerate(row_names):
@@ -198,7 +178,7 @@ def plot_vertical_bubble_histo(csv_path, discriminator):
                 text = f'{row.pct:.3%}'
 
             ax.text(
-                row.x, -y + row.rad, text0,
+                row.x, -y + row.rad + 0.01, text0,
                 horizontalalignment='center', verticalalignment='bottom',
                 fontsize=fontsize,
                 **fontstuff,
@@ -208,35 +188,21 @@ def plot_vertical_bubble_histo(csv_path, discriminator):
                     row.x, -y + 0.012, text,
                     horizontalalignment='center', verticalalignment='center',
                     fontsize=fontsize,
-                    # **fontstuff,
                 )
             else:
                 ax.text(
                     row.x, -y - row.rad - 0.037, text,
                     horizontalalignment='center', verticalalignment='top',
                     fontsize=fontsize_small,
-                    # **fontstuff,
                 )
 
-
-    # for axis in ['bottom','right']:
-        # ax.spines[axis].set_linewidth(0)
     for axis in ['left', 'top','bottom','right']:
         ax.spines[axis].set_edgecolor('lightgrey')
 
-    # if 'path' in discriminator:
-    if True:
-        ax.tick_params(
-            labelbottom=False,labeltop=True,
-            labelleft=False,labelright=True,
-        )
-        ax.xaxis.tick_top()
-        ax.yaxis.tick_right()
-    # else:
-    #     ax.tick_params(
-    #         labelbottom=False,labeltop=True,
-    #     )
-    #     ax.xaxis.tick_top()
+    plt.tick_params(top=False, bottom=False, left=False, right=False,
+                    labelbottom=False,labeltop=True,
+                    labelleft=False,labelright=True,
+                    )
 
     ax.set_xlim(0, max(xs) + 0.5 + xborder)
     ax.set_xticks(xs)

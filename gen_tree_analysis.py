@@ -9,7 +9,9 @@ pd.set_option('display.float_format', lambda x: '%.2f' % x)
 
 
 def on_averaged_tree(df, fname, block_desc, block_subdesc,
-                     filter_name=None, kind_desc=None, distance_desc=None, path2_desc=None, path3_desc=None):
+                     filter_name=None,
+                     summary_desc=None,
+                     kind_desc=None, distance_desc=None, path2_desc=None, path3_desc=None):
     print('Generating', fname)
     nb = nbf.v4.new_notebook()
     cells = []
@@ -27,7 +29,6 @@ def on_averaged_tree(df, fname, block_desc, block_subdesc,
 {a}
 """
     cells.append(nbf.v4.new_markdown_cell(cell))
-    # %config InlineBackend.figure_format = 'svg'
 
     # **************************************************************************
     cell = f"""\
@@ -50,23 +51,28 @@ from custom_plot_tools import plot_vertical_bubble_histo"""
 ### Summary
 ```
 Number of bytes: {int(d.loc['bytes']):,d}. Breakdown:
-  - {float(d.loc['header_bytes'] / d.loc['bytes']):4.0%} {int(d.loc['header_bytes']):>11,d}B in 32 byte hash of objects,
-  - {float(d.loc['direct_bytes'] / d.loc['bytes']):4.0%} {int(d.loc['direct_bytes']):>11,d}B in hard coded steps (a.k.a. direct step),
-  - {float(d.loc['other_bytes'] / d.loc['bytes']):4.0%} {int(d.loc['other_bytes']):>11,d}B elsewhere (i.e. length segment + value segment).
+  - {float(d.loc['header_bytes'] / max(1, d.loc['bytes'])):4.0%} {int(d.loc['header_bytes']):>11,d}B in 32 byte hash of objects,
+  - {float(d.loc['direct_bytes'] / max(1, d.loc['bytes'])):4.0%} {int(d.loc['direct_bytes']):>11,d}B in hard coded steps (a.k.a. direct step),
+  - {float(d.loc['other_bytes'] / max(1, d.loc['bytes'])):4.0%} {int(d.loc['other_bytes']):>11,d}B elsewhere (i.e. length segment + value segment).
 
 Number of objects: {int(d.loc['count']):,d} (a.k.a. pack file entries). Breakdown:
-  - {float(d.loc['blob_count'] / d.loc['count']):4.0%} {int(d.loc['blob_count']):>10,d} contents (a.k.a. blobs),
-  - {float(d.loc['node_count'] / d.loc['count']):4.0%} {int(d.loc['node_count']):>10,d} nodes (a.k.a. root inodes),
-  - {float(d.loc['inner_count'] / d.loc['count']):4.0%} {int(d.loc['inner_count']):>10,d} hidden nodes (a.k.a. non-root inodes).
+  - {float(d.loc['blob_count'] / max(1, d.loc['count'])):4.0%} {int(d.loc['blob_count']):>10,d} contents (a.k.a. blobs),
+  - {float(d.loc['node_count'] / max(1, d.loc['count'])):4.0%} {int(d.loc['node_count']):>10,d} nodes (a.k.a. root inodes),
+  - {float(d.loc['inner_count'] / max(1, d.loc['count'])):4.0%} {int(d.loc['inner_count']):>10,d} hidden nodes (a.k.a. non-root inodes).
 
 Number of steps: {int(d.loc['step_count']):,d}{a}. Breakdown:
-  - {float(d.loc['direct_count'] / d.loc['step_count']):4.0%} {int(d.loc['direct_count']):>10,d} by direct references (i.e. parent records hard coded step),
-  - {float(d.loc['indirect_count'] / d.loc['step_count']):4.0%} {int(d.loc['indirect_count']):>10,d} by indirect references (i.e. parent records "dict" id),
+  - {float(d.loc['direct_count'] / max(1, d.loc['step_count'])):4.0%} {int(d.loc['direct_count']):>10,d} by direct references (i.e. parent records hard coded step),
+  - {float(d.loc['indirect_count'] / max(1, d.loc['step_count'])):4.0%} {int(d.loc['indirect_count']):>10,d} by indirect references (i.e. parent records "dict" id),
 ```
 {b}
 
 """
     cells.append(nbf.v4.new_markdown_cell(cell))
+
+    # **************************************************************************
+    if summary_desc is not None:
+        cell = summary_desc
+        cells.append(nbf.v4.new_markdown_cell(cell))
 
 
     # **************************************************************************
@@ -83,7 +89,8 @@ The following plot groups the objects into 10 categories:
 
     # **************************************************************************
     cell = f"""\
-plot_vertical_bubble_histo('/tmp/{fname}.csv', 'ekind')"""
+plot_vertical_bubble_histo('/tmp/{fname}.csv',
+                           'ekind')"""
     cells.append(nbf.v4.new_code_cell(cell))
 
 
@@ -106,7 +113,8 @@ For instance, `<1 cycle` implies that the objects in that row are less than 1 cy
 
     # **************************************************************************
     cell = f"""\
-plot_vertical_bubble_histo('/tmp/{fname}.csv', 'area_distance_from_origin')"""
+plot_vertical_bubble_histo('/tmp/{fname}.csv',
+                           'area_distance_from_origin')"""
     cells.append(nbf.v4.new_code_cell(cell))
 
 
@@ -126,7 +134,9 @@ The following plot groups the objects into 4 categories, depending on their ance
         cells.append(nbf.v4.new_markdown_cell(cell))
 
         # **************************************************************************
-        cell = f"""plot_vertical_bubble_histo('/tmp/{fname}.csv', 'path2')"""
+        cell = f"""\
+plot_vertical_bubble_histo('/tmp/{fname}.csv',
+                           'path2')"""
         cells.append(nbf.v4.new_code_cell(cell))
 
         # **************************************************************************
@@ -144,7 +154,9 @@ The following plot groups the objects on 8 interesting locations.
         cells.append(nbf.v4.new_markdown_cell(cell))
 
         # **************************************************************************
-        cell = f"""plot_vertical_bubble_histo('/tmp/{fname}.csv', 'path3')"""
+        cell = f"""\
+plot_vertical_bubble_histo('/tmp/{fname}.csv',
+                           'path3')"""
         cells.append(nbf.v4.new_code_cell(cell))
 
         # **************************************************************************
@@ -162,7 +174,9 @@ The following plot groups the objects on their precise location.
         cells.append(nbf.v4.new_markdown_cell(cell))
 
         # **************************************************************************
-        cell = f"""plot_vertical_bubble_histo('/tmp/{fname}.csv', 'path')"""
+        cell = f"""\
+plot_vertical_bubble_histo('/tmp/{fname}.csv',
+                           'path')"""
         cells.append(nbf.v4.new_code_cell(cell))
 
         # **************************************************************************
@@ -181,6 +195,8 @@ discriminators = 'area_distance_from_origin path path2 path3 kind node_length co
 indicators = 'count node_count inner_count blob_count step_count indirect_count direct_count bytes direct_bytes header_bytes other_bytes'.split(' ')
 
 df = pd.read_csv('csv/entries.csv')
+
+df1 = df.copy()
 
 # Fix the broken paths
 df['path'] = df.path.fillna('/')
@@ -234,6 +250,8 @@ on_averaged_tree(
     path3_desc= f"""\
 💡 The `/data/contracts/index` directory is made of nearly 1 million inodes. It points to nearly 2 million nodes (i.e. `/data/contracts/index/*`). (Technically it points to `2,003,307` nodes but only `1,988,785` objects due to sharing)
 
+These paths are also individually analysed in separate files.
+
 """,
 )
 
@@ -245,6 +263,30 @@ on_averaged_tree(
     fname='tree_of_cycle_445_contracts-index.ipynb',
     filter_name='zoom on this node: `/data/contracts/index`',
 )
+
+descs = {
+    '/data/contracts/index/*/manager': dict(
+#         distance_desc = f"""\
+# 💡 Very few new "manager" contents enter the pack file on the last cycles. However, many new contracts enter the pack file on these cycles (see `/data/contracts/index/*` [(url)](./tree_of_cycle_445_contracts-index-star.ipynb)), it implies that the new contracts share the "manager" files with the older contracts.
+# """,
+    ),
+    '/data/contracts/index/*': dict(
+        distance_desc = f"""\
+💡 124.4k contracts were modified (or added) during the last cycle.
+
+💡 14.5k contracts were modified (or added) 2 cycles ago and were not modified since.
+""",
+    ),
+    '/data/big_maps/index/*/contents': dict(
+    kind_desc = f"""\
+💡 The 62 very large nodes weigh almost 1GB, while the full tree weighs 2.5GB.
+""",
+    summary_desc = f"""\
+💡 The steps all have length 65 here. They represent 818MB out of the 2.5GB that the full tree weighs.
+""",
+
+    )
+}
 
 for p in [
         '/data/big_maps/index/*/contents',
@@ -262,6 +304,7 @@ for p in [
         block_subdesc="the second block of cycle 445 (created on Jan 23, 2022)",
         fname=f'tree_of_cycle_445_{q}.ipynb',
         filter_name=f'zoom on this node: `{p}`',
+        **(descs.get(p, {})),
     )
 
 
