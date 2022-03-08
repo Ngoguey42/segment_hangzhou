@@ -8,7 +8,9 @@ pd.set_option('display.max_rows', 120)
 pd.set_option('display.float_format', lambda x: '%.2f' % x)
 
 
-def on_averaged_tree(df, fname, block_desc, block_subdesc, filter_name=None):
+def on_averaged_tree(df, fname, block_desc, block_subdesc,
+                     filter_name=None, kind_desc=None, distance_desc=None, path2_desc=None, path3_desc=None):
+    print('Generating', fname)
     nb = nbf.v4.new_notebook()
     cells = []
     df.to_csv(f'/tmp/{fname}.csv', index=False)
@@ -18,7 +20,6 @@ def on_averaged_tree(df, fname, block_desc, block_subdesc, filter_name=None):
         a = ""
     else:
         a = f'##### {filter_name}'
-    print(filter_name, a)
     cell = f"""\
 # Analysis of the Irmin tree of {block_desc}
 ### which is {block_subdesc}
@@ -26,6 +27,15 @@ def on_averaged_tree(df, fname, block_desc, block_subdesc, filter_name=None):
 {a}
 """
     cells.append(nbf.v4.new_markdown_cell(cell))
+
+    # **************************************************************************
+    cell = f"""\
+%matplotlib inline
+%config InlineBackend.figure_format = 'svg'
+%load_ext autoreload
+%autoreload 2
+from custom_plot_tools import plot_vertical_bubble_histo"""
+    cells.append(nbf.v4.new_code_cell(cell))
 
     # **************************************************************************
     d = df[indicators].sum()
@@ -56,24 +66,108 @@ Number of steps: {int(d.loc['step_count']):,d}{a}. Breakdown:
 {b}
 
 """
-    print(cell)
+    cells.append(nbf.v4.new_markdown_cell(cell))
+
+
+    # **************************************************************************
+    # **************************************************************************
+    cell = f"""\
+### Objects Kind
+
+The following plot groups the objects into 10 categories:
+- 4 categories for contents, depending on their size,
+- 5 categories for inodes, depending on the size of the node they belong to,
+- 1 extra category for inodes that appear in several categories at once.
+"""
     cells.append(nbf.v4.new_markdown_cell(cell))
 
     # **************************************************************************
     cell = f"""\
-%matplotlib inline
-import custom_plot_tools
-
-custom_plot_tools.plot_vertical_bubble_histo(
-    '/tmp/{fname}.csv',
-    discriminator='ekind',
-)
-
-"""
+plot_vertical_bubble_histo('/tmp/{fname}.csv', 'ekind')"""
     cells.append(nbf.v4.new_code_cell(cell))
 
 
+    # **************************************************************************
+    if kind_desc is not None:
+        cell = kind_desc
+        cells.append(nbf.v4.new_markdown_cell(cell))
 
+
+    # **************************************************************************
+    # **************************************************************************
+    cell = f"""\
+### Objects Distance to Commit
+
+The following plot groups the objects into 5 categories, depending on their distance to the commit of the tree.
+For instance, `<1 cycle` implies that the objects in that row are less than 1 cycle away from the commit being analysed (i.e. less than 8200 blocks away, less than 3 days away).
+
+"""
+    cells.append(nbf.v4.new_markdown_cell(cell))
+
+    # **************************************************************************
+    cell = f"""\
+plot_vertical_bubble_histo('/tmp/{fname}.csv', 'area_distance_from_origin')"""
+    cells.append(nbf.v4.new_code_cell(cell))
+
+
+    # **************************************************************************
+    if distance_desc is not None:
+        cell = distance_desc
+        cells.append(nbf.v4.new_markdown_cell(cell))
+
+    if filter_name is None:
+        # **************************************************************************
+        # **************************************************************************
+        cell = f"""\
+### Objects Path
+
+The following plot groups the objects into 4 categories, depending on their ancestor directory.
+    """
+        cells.append(nbf.v4.new_markdown_cell(cell))
+
+        # **************************************************************************
+        cell = f"""plot_vertical_bubble_histo('/tmp/{fname}.csv', 'path2')"""
+        cells.append(nbf.v4.new_code_cell(cell))
+
+        # **************************************************************************
+        if path2_desc is not None:
+            cell = path2_desc
+            cells.append(nbf.v4.new_markdown_cell(cell))
+
+        # **************************************************************************
+        # **************************************************************************
+        cell = f"""\
+The following plot groups the objects on 8 interesting locations.
+"""
+        cells.append(nbf.v4.new_markdown_cell(cell))
+
+        # **************************************************************************
+        cell = f"""plot_vertical_bubble_histo('/tmp/{fname}.csv', 'path3')"""
+        cells.append(nbf.v4.new_code_cell(cell))
+
+        # **************************************************************************
+        if path3_desc is not None:
+            cell = path3_desc
+            cells.append(nbf.v4.new_markdown_cell(cell))
+
+        # **************************************************************************
+        # **************************************************************************
+        cell = f"""\
+The following plot groups the objects on their precise location.
+"""
+        cells.append(nbf.v4.new_markdown_cell(cell))
+
+        # **************************************************************************
+        cell = f"""plot_vertical_bubble_histo('/tmp/{fname}.csv', 'path')"""
+        cells.append(nbf.v4.new_code_cell(cell))
+
+        # **************************************************************************
+        # if path3_desc is not None:
+            # cell = path3_desc
+            # cells.append(nbf.v4.new_markdown_cell(cell))
+
+
+    # **************************************************************************
     # **************************************************************************
     nb['cells'] = cells
     with open(fname, 'w') as f:
@@ -116,22 +210,55 @@ df = df.drop(columns=['entry_area'])
 # df = df.groupby(discriminators)[indicators].sum() / tree_count
 # df = df.reset_index()
 
-# d = df.set_index('parent_cycle_start').loc[445].reset_index(drop=True)
-# on_averaged_tree(
-#     d,
-#     block_desc="block level 2_002_944 which is the second block of cycle 438",
-#     block_subdesc="the second block of cycle 438 (created on Jan 4, 2022)",
-#     fname='average_tree.ipynb',
-# )
-
-d = df.set_index('parent_cycle_start').loc[445].query('path3 == "/data/contracts/index/*"').reset_index(drop=True)
+d = df.set_index('parent_cycle_start').loc[445].reset_index(drop=True)
 on_averaged_tree(
     d,
-    block_desc="block level 2_002_944",
-    block_subdesc="the second block of cycle 438 (created on Jan 4, 2022)",
-    fname='average_tree.ipynb',
-    filter_name='zoom on these entries: "/data/contracts/index/*"',
+    block_desc="block level 2,056,194",
+    block_subdesc="the second block of cycle 445 (created on Jan 23, 2022)",
+    fname='tree_of_cycle_445.ipynb',
+    kind_desc = f"""\
+💡 94 nodes have a length greater than 16k, they make up 46% of the bytes of the tree.
+
+💡 Almost all nodes are small (i.e. with a length of 32 or less)
+""",
+    distance_desc = f"""\
+💡 A single cycle doesn't modifies a lot the Irmin tree.
+""",
+    path2_desc= f"""\
+💡 Almost all the data is contained in `big_maps` and `contracts`.
+""",
+    path3_desc= f"""\
+💡 The `/data/contracts/index` directory is made of nearly 1 million inodes. It points to nearly 2 million nodes (i.e. `/data/contracts/index/*`). (Technically it points to `2,003,307` nodes but only `1,988,785` objects due to sharing)
+
+""",
 )
+
+d = df.set_index('parent_cycle_start').loc[445].query('path3 == "/data/contracts/index"').reset_index(drop=True)
+on_averaged_tree(
+    d,
+    block_desc="block level 2,056,194",
+    block_subdesc="the second block of cycle 445 (created on Jan 23, 2022)",
+    fname='tree_of_cycle_445_contracts-index.ipynb',
+    filter_name='zoom on this node: `/data/contracts/index`',
+)
+
+for p in [
+        '/data/big_maps/index/*/contents',
+        '/data/big_maps/index/*/contents/*',
+        '/data/big_maps/index/*/contents/*/data',
+        '/data/contracts/index',
+        '/data/contracts/index/*',
+        '/data/contracts/index/*/manager',
+]:
+    q = p.replace('/data/', '').replace('/', '-').replace('*', 'star')
+    d = df.set_index('parent_cycle_start').loc[445].query(f'path3 == "{p}"').reset_index(drop=True)
+    on_averaged_tree(
+        d,
+        block_desc="block level 2,056,194",
+        block_subdesc="the second block of cycle 445 (created on Jan 23, 2022)",
+        fname=f'tree_of_cycle_445_{q}.ipynb',
+        filter_name=f'zoom on this node: `{p}`',
+    )
 
 
 
