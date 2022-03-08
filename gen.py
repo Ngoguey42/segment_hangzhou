@@ -137,6 +137,8 @@ The following plot groups the objects into 4 categories, depending on their ance
         # **************************************************************************
         # **************************************************************************
         cell = f"""\
+<br/>
+
 The following plot groups the objects on 8 interesting locations.
 """
         cells.append(nbf.v4.new_markdown_cell(cell))
@@ -153,6 +155,8 @@ The following plot groups the objects on 8 interesting locations.
         # **************************************************************************
         # **************************************************************************
         cell = f"""\
+<br/>
+
 The following plot groups the objects on their precise location.
 """
         cells.append(nbf.v4.new_markdown_cell(cell))

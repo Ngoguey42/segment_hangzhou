@@ -110,9 +110,13 @@ def plot_vertical_bubble_histo(csv_path, discriminator):
         fmt_megabyte,
     ]
 
-    fontsize_out=8.5 * 1.3
-    fontsize_small=6 * 1.4
-    fontsize=6.5 * 1.25
+    if discriminator != 'path':
+        figsize = np.asarray([5.5, 5.5])
+    else:
+        figsize = np.asarray([5.5, 50])
+    fontsize_out=8.5
+    fontsize_small=6
+    fontsize=6.5
     fontstuff = dict(
         # fontweight="ultralight",
         # fontstyle='italic',
@@ -136,16 +140,12 @@ def plot_vertical_bubble_histo(csv_path, discriminator):
 
     plt.close('all')
     # figsize = np.asarray([len(cols), len(L)]) * 2
-    if discriminator != 'path':
-        figsize = np.asarray([8, 8])
-    else:
-        figsize = np.asarray([7, 70])
 
     # print('figsize', figsize)
     fig, ax = plt.subplots(
         # nrows=3,
         subplot_kw=dict(aspect="equal"),
-        # dpi=200,
+        dpi=100,
         figsize=figsize,
         # gridspec_kw = {'wspace':0, 'hspace':0},
         # constrained_layout=True,
@@ -224,18 +224,19 @@ def plot_vertical_bubble_histo(csv_path, discriminator):
     for axis in ['left', 'top','bottom','right']:
         ax.spines[axis].set_edgecolor('lightgrey')
 
-    if 'path' in discriminator:
+    # if 'path' in discriminator:
+    if True:
         ax.tick_params(
             labelbottom=False,labeltop=True,
             labelleft=False,labelright=True,
         )
         ax.xaxis.tick_top()
         ax.yaxis.tick_right()
-    else:
-        ax.tick_params(
-            labelbottom=False,labeltop=True,
-        )
-        ax.xaxis.tick_top()
+    # else:
+    #     ax.tick_params(
+    #         labelbottom=False,labeltop=True,
+    #     )
+    #     ax.xaxis.tick_top()
 
     ax.set_xlim(0, max(xs) + 0.5 + xborder)
     ax.set_xticks(xs)
