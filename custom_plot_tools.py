@@ -87,21 +87,30 @@ def plot_vertical_bubble_histo(csv_path, discriminator):
         maxlen = max(map(len, row_names))
         ylabs = row_names
 
-    cols = ['count', 'node_count', 'bytes']
-    xlabs = [
-        'object count',
-        'node count',
-        'byte count'
-    ]
+    min_area = 0.15 / 100
     yborder = 0.2
     xborder = 0.4
     xshift = 1.3
+    cols = [
+        'node_count',
+        'blob_count',
+        'count',
+        'bytes',
+    ]
+    xlabs = [
+        'node count',
+        'contents count',
+        'object count',
+        'byte count',
+    ]
     xs = [
         xborder + 0.5,
         xborder + 0.5 + xshift * 1,
         xborder + 0.5 + xshift * 2,
+        xborder + 0.5 + xshift * 3,
     ]
     fmts = [
+        fmt_count,
         fmt_count,
         fmt_count,
         fmt_megabyte,
@@ -132,7 +141,6 @@ def plot_vertical_bubble_histo(csv_path, discriminator):
     )
 
     max_area = np.pi * 0.5 ** 2
-    min_area = 0.15 / 100
     max_pct = (df[cols] / df[cols].sum()).max().max()
     for (col, fmt, x) in (zip(cols, fmts, xs)):
         fmt = fmt(df[col])
@@ -199,10 +207,11 @@ def plot_vertical_bubble_histo(csv_path, discriminator):
     for axis in ['left', 'top','bottom','right']:
         ax.spines[axis].set_edgecolor('lightgrey')
 
-    plt.tick_params(top=False, bottom=False, left=False, right=False,
-                    labelbottom=False,labeltop=True,
-                    labelleft=False,labelright=True,
-                    )
+    plt.tick_params(
+        top=False, bottom=False, left=False, right=False,
+        labelbottom=False,labeltop=True,
+        labelleft=False,labelright=True,
+    )
 
     ax.set_xlim(0, max(xs) + 0.5 + xborder)
     ax.set_xticks(xs)

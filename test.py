@@ -20,7 +20,7 @@
 #   - For each indicator, its total value
 #
 # - In an "average tree", 1d break down
-#   - #roots/#entries/#bytes (3 pies or 1 vertical bubble list with 3 cols)
+#   - #nodes/#entries/#bytes (3 pies or 1 vertical bubble list with 3 cols)
 #   - For each indicator.
 #     - Kind9
 #     - Distance from commit5
@@ -32,7 +32,7 @@
 #
 # - In an "average tree", 2d break down
 #   - 9 grids with a circle in all cells with area equal to importance
-#     - #roots/#entries/#bytes
+#     - #nodes/#entries/#bytes
 #     - 9kinds, 8paths, 5dists
 #       - left=kind,   top=dist
 #       - left=path,   top=dist
@@ -46,10 +46,10 @@
 #
 # * OVER ALL TREES *************************************************************
 #
-# - Over all trees, how evolves #roots/#entries/#bytes
+# - Over all trees, how evolves #nodes/#entries/#bytes
 #  - A simplified version of the following one
 #
-# - Over all trees, how evolves  #roots/#entries/#bytes
+# - Over all trees, how evolves  #nodes/#entries/#bytes
 #  - One plot for each discriminator,
 #  - In a plot are stacked the categories of an indicator
 #
