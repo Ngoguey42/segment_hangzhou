@@ -97,7 +97,7 @@ def plot_vertical_bubble_histo(csv_path, discriminator):
         'byte count'
     ]
     yborder = 0.2
-    xborder = 0.25
+    xborder = 0.4
     xshift = 1.1
     xs = [
         xborder + 0.5,
@@ -110,9 +110,9 @@ def plot_vertical_bubble_histo(csv_path, discriminator):
         fmt_megabyte,
     ]
 
-    fontsize_out=8.5
-    fontsize_small=6
-    fontsize=6.5
+    fontsize_out=8.5 * 1.3
+    fontsize_small=6 * 1.4
+    fontsize=6.5 * 1.25
     fontstuff = dict(
         # fontweight="ultralight",
         # fontstyle='italic',
@@ -137,9 +137,9 @@ def plot_vertical_bubble_histo(csv_path, discriminator):
     plt.close('all')
     # figsize = np.asarray([len(cols), len(L)]) * 2
     if discriminator != 'path':
-        figsize = np.asarray([7, 7])
+        figsize = np.asarray([8, 8])
     else:
-        figsize = np.asarray([7, 50])
+        figsize = np.asarray([7, 70])
 
     # print('figsize', figsize)
     fig, ax = plt.subplots(

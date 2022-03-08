@@ -27,11 +27,11 @@ def on_averaged_tree(df, fname, block_desc, block_subdesc,
 {a}
 """
     cells.append(nbf.v4.new_markdown_cell(cell))
+    # %config InlineBackend.figure_format = 'svg'
 
     # **************************************************************************
     cell = f"""\
 %matplotlib inline
-%config InlineBackend.figure_format = 'svg'
 %load_ext autoreload
 %autoreload 2
 from custom_plot_tools import plot_vertical_bubble_histo"""
