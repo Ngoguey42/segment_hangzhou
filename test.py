@@ -71,6 +71,12 @@
 # - 0d break down of the full file
 #
 #
+# Explanation on area_distance_from_origin
+#
+# --- towards beginning of pack files ----- toward end of pack file ----
+# plot a dummy tree with topo groups, relate that to pack file offsets
+#
+# Explanation on how to read 1d and 2d bubble histo
 #
 #
 

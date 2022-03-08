@@ -35,7 +35,7 @@ def on_averaged_tree(df, fname, block_desc, block_subdesc,
 %matplotlib inline
 %load_ext autoreload
 %autoreload 2
-from custom_plot_tools import plot_vertical_bubble_histo"""
+from custom_plot_tools import plot_4_vertical_bubble_histo, plot_grid_bubble_histo"""
     cells.append(nbf.v4.new_code_cell(cell))
 
     # **************************************************************************
@@ -57,7 +57,7 @@ Number of bytes: {int(d.loc['bytes']):,d}. Breakdown:
 
 Number of objects: {int(d.loc['count']):,d} (a.k.a. pack file entries). Breakdown:
   - {float(d.loc['blob_count'] / max(1, d.loc['count'])):4.0%} {int(d.loc['blob_count']):>10,d} contents (a.k.a. blobs),
-  - {float(d.loc['node_count'] / max(1, d.loc['count'])):4.0%} {int(d.loc['node_count']):>10,d} nodes (a.k.a. root inodes),
+  - {float(d.loc['node_count'] / max(1, d.loc['count'])):4.0%} {int(d.loc['node_count']):>10,d} nodes (a.k.a. root inodes, directory),
   - {float(d.loc['inner_count'] / max(1, d.loc['count'])):4.0%} {int(d.loc['inner_count']):>10,d} hidden nodes (a.k.a. non-root inodes).
 
 Number of steps: {int(d.loc['step_count']):,d}{a}. Breakdown:
@@ -89,7 +89,7 @@ The following plot groups the objects into 10 categories:
 
     # **************************************************************************
     cell = f"""\
-plot_vertical_bubble_histo('/tmp/{fname}.csv',
+plot_4_vertical_bubble_histo('/tmp/{fname}.csv',
                            'ekind')"""
     cells.append(nbf.v4.new_code_cell(cell))
 
@@ -113,7 +113,7 @@ For instance, `<1 cycle` implies that the objects in that row are less than 1 cy
 
     # **************************************************************************
     cell = f"""\
-plot_vertical_bubble_histo('/tmp/{fname}.csv',
+plot_4_vertical_bubble_histo('/tmp/{fname}.csv',
                            'area_distance_from_origin')"""
     cells.append(nbf.v4.new_code_cell(cell))
 
@@ -135,7 +135,7 @@ The following plot groups the objects into 4 categories, depending on their ance
 
         # **************************************************************************
         cell = f"""\
-plot_vertical_bubble_histo('/tmp/{fname}.csv',
+plot_4_vertical_bubble_histo('/tmp/{fname}.csv',
                            'path2')"""
         cells.append(nbf.v4.new_code_cell(cell))
 
@@ -153,13 +153,11 @@ The following plot groups the objects on 8 interesting locations.
 """
         cells.append(nbf.v4.new_markdown_cell(cell))
 
-        # **************************************************************************
         cell = f"""\
-plot_vertical_bubble_histo('/tmp/{fname}.csv',
+plot_4_vertical_bubble_histo('/tmp/{fname}.csv',
                            'path3')"""
         cells.append(nbf.v4.new_code_cell(cell))
 
-        # **************************************************************************
         if path3_desc is not None:
             cell = path3_desc
             cells.append(nbf.v4.new_markdown_cell(cell))
@@ -173,16 +171,58 @@ The following plot groups the objects on their precise location.
 """
         cells.append(nbf.v4.new_markdown_cell(cell))
 
-        # **************************************************************************
-        cell = f"""\
-plot_vertical_bubble_histo('/tmp/{fname}.csv',
-                           'path')"""
-        cells.append(nbf.v4.new_code_cell(cell))
+
+        cells.append(nbf.v4.new_code_cell(f"""\
+plot_4_vertical_bubble_histo('/tmp/{fname}.csv',
+                             'path')"""))
 
         # **************************************************************************
         # if path3_desc is not None:
             # cell = path3_desc
             # cells.append(nbf.v4.new_markdown_cell(cell))
+
+
+    # **************************************************************************
+    # **************************************************************************
+    cells.append(nbf.v4.new_markdown_cell(f"""\
+### toto
+
+toto
+"""))
+    cells.append(nbf.v4.new_code_cell(f"""\
+plot_grid_bubble_histo('/tmp/{fname}.csv',
+                       'bytes', 'area_distance_from_origin', 'ekind')"""))
+    cells.append(nbf.v4.new_code_cell(f"""\
+plot_grid_bubble_histo('/tmp/{fname}.csv',
+                       'count', 'area_distance_from_origin', 'ekind')"""))
+
+    # **************************************************************************
+    # **************************************************************************
+    cells.append(nbf.v4.new_markdown_cell(f"""\
+### toto
+
+toto
+"""))
+    cells.append(nbf.v4.new_code_cell(f"""\
+plot_grid_bubble_histo('/tmp/{fname}.csv',
+                       'bytes', 'area_distance_from_origin', 'path3')"""))
+    cells.append(nbf.v4.new_code_cell(f"""\
+plot_grid_bubble_histo('/tmp/{fname}.csv',
+                       'count', 'area_distance_from_origin', 'path3')"""))
+
+    # **************************************************************************
+    # **************************************************************************
+    cells.append(nbf.v4.new_markdown_cell(f"""\
+### toto
+
+toto
+"""))
+    cells.append(nbf.v4.new_code_cell(f"""\
+plot_grid_bubble_histo('/tmp/{fname}.csv',
+                       'bytes', 'ekind', 'path3')"""))
+    cells.append(nbf.v4.new_code_cell(f"""\
+plot_grid_bubble_histo('/tmp/{fname}.csv',
+                       'count', 'ekind', 'path3')"""))
 
 
     # **************************************************************************
@@ -269,6 +309,11 @@ descs = {
 #         distance_desc = f"""\
 # 💡 Very few new "manager" contents enter the pack file on the last cycles. However, many new contracts enter the pack file on these cycles (see `/data/contracts/index/*` [(url)](./tree_of_cycle_445_contracts-index-star.ipynb)), it implies that the new contracts share the "manager" files with the older contracts.
 # """,
+    ),
+    '/data/contracts/index': dict(
+        distance_desc = f"""\
+💡 This directory is modified all the time (most likely at every block). A new root inode has to be re-commited every time it is modified, this is why the bubble for "node count" shows on the first row.
+""",
     ),
     '/data/contracts/index/*': dict(
         distance_desc = f"""\
