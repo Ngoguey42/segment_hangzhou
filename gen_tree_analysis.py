@@ -1,4 +1,3 @@
-
 import pandas as pd
 import nbformat as nbf
 
@@ -7,37 +6,52 @@ from path_patterns import path_pats
 pd.set_option('display.max_rows', 120)
 pd.set_option('display.float_format', lambda x: '%.2f' % x)
 
+def trimleft(txt):
+    lines = txt.split('\n')
+    indentation = min(
+        len(l) - len(l.lstrip(' '))
+        for l in lines
+        if l != ''
+    )
+    # print('[[[' + txt + ']]]')
+    # print('indentation', indentation)
+    # assert indentation > 0
+    lines = [
+        l[indentation:]
+        for l in lines
+    ]
+    return '\n'.join(lines)
 
-def on_averaged_tree(df, fname, block_desc, block_subdesc,
-                     filter_name=None,
-                     summary_desc=None,
-                     kind_desc=None, distance_desc=None, path2_desc=None, path3_desc=None):
+def on_averaged_tree(df, fname, block_desc, block_subdesc, filter_name=None, **kwargs):
+                     # summary_desc=None,
+                     # kind_desc=None, distance_desc=None, path2_desc=None, path3_desc=None):
     print('Generating', fname)
     nb = nbf.v4.new_notebook()
     cells = []
     df.to_csv(f'/tmp/{fname}.csv', index=False)
 
+    markdown = lambda cell: cells.append(nbf.v4.new_markdown_cell(trimleft(cell)))
+    code = lambda cell: cells.append(nbf.v4.new_code_cell(trimleft(cell)))
+
+    # **************************************************************************
     # **************************************************************************
     if filter_name is None:
         a = ""
     else:
         a = f'##### {filter_name}'
-    cell = f"""\
-# Analysis of the Irmin tree of {block_desc}
-### which is {block_subdesc}
+    markdown(f"""\
+    # Analysis of the Irmin tree of {block_desc}
+    ### which is {block_subdesc}
 
-{a}
-"""
-    cells.append(nbf.v4.new_markdown_cell(cell))
+    {a}
+    """)
+    code(f"""\
+    %matplotlib inline
+    %load_ext autoreload
+    %autoreload 2
+    from custom_plot_tools import plot_4_vertical_bubble_histo, plot_grid_bubble_histo""")
 
     # **************************************************************************
-    cell = f"""\
-%matplotlib inline
-%load_ext autoreload
-%autoreload 2
-from custom_plot_tools import plot_4_vertical_bubble_histo, plot_grid_bubble_histo"""
-    cells.append(nbf.v4.new_code_cell(cell))
-
     # **************************************************************************
     d = df[indicators].sum()
     if filter_name is None:
@@ -46,183 +60,141 @@ from custom_plot_tools import plot_4_vertical_bubble_histo, plot_grid_bubble_his
     else:
         a = " (i.e. number of children in the nodes)"
         b = ""
+    markdown(f"""\
+    ### Summary
+    ```
+    Number of bytes: {int(d.loc['bytes']):,d}. Breakdown:
+    - {float(d.loc['header_bytes'] / max(1, d.loc['bytes'])):4.0%} {int(d.loc['header_bytes']):>11,d}B in 32 byte hash of objects,
+    - {float(d.loc['direct_bytes'] / max(1, d.loc['bytes'])):4.0%} {int(d.loc['direct_bytes']):>11,d}B in hard coded steps (a.k.a. direct step),
+    - {float(d.loc['other_bytes'] / max(1, d.loc['bytes'])):4.0%} {int(d.loc['other_bytes']):>11,d}B elsewhere (i.e. length segment + value segment).
 
-    cell = f"""\
-### Summary
-```
-Number of bytes: {int(d.loc['bytes']):,d}. Breakdown:
-  - {float(d.loc['header_bytes'] / max(1, d.loc['bytes'])):4.0%} {int(d.loc['header_bytes']):>11,d}B in 32 byte hash of objects,
-  - {float(d.loc['direct_bytes'] / max(1, d.loc['bytes'])):4.0%} {int(d.loc['direct_bytes']):>11,d}B in hard coded steps (a.k.a. direct step),
-  - {float(d.loc['other_bytes'] / max(1, d.loc['bytes'])):4.0%} {int(d.loc['other_bytes']):>11,d}B elsewhere (i.e. length segment + value segment).
+    Number of objects: {int(d.loc['count']):,d} (a.k.a. pack file entries). Breakdown:
+    - {float(d.loc['blob_count'] / max(1, d.loc['count'])):4.0%} {int(d.loc['blob_count']):>10,d} contents (a.k.a. blobs),
+    - {float(d.loc['node_count'] / max(1, d.loc['count'])):4.0%} {int(d.loc['node_count']):>10,d} nodes (a.k.a. root inodes, directory),
+    - {float(d.loc['inner_count'] / max(1, d.loc['count'])):4.0%} {int(d.loc['inner_count']):>10,d} hidden nodes (a.k.a. non-root inodes).
 
-Number of objects: {int(d.loc['count']):,d} (a.k.a. pack file entries). Breakdown:
-  - {float(d.loc['blob_count'] / max(1, d.loc['count'])):4.0%} {int(d.loc['blob_count']):>10,d} contents (a.k.a. blobs),
-  - {float(d.loc['node_count'] / max(1, d.loc['count'])):4.0%} {int(d.loc['node_count']):>10,d} nodes (a.k.a. root inodes, directory),
-  - {float(d.loc['inner_count'] / max(1, d.loc['count'])):4.0%} {int(d.loc['inner_count']):>10,d} hidden nodes (a.k.a. non-root inodes).
+    Number of steps: {int(d.loc['step_count']):,d}{a}. Breakdown:
+    - {float(d.loc['direct_count'] / max(1, d.loc['step_count'])):4.0%} {int(d.loc['direct_count']):>10,d} by direct references (i.e. parent records hard coded step),
+    - {float(d.loc['indirect_count'] / max(1, d.loc['step_count'])):4.0%} {int(d.loc['indirect_count']):>10,d} by indirect references (i.e. parent records "dict" id),
+    ```
+    {b}
 
-Number of steps: {int(d.loc['step_count']):,d}{a}. Breakdown:
-  - {float(d.loc['direct_count'] / max(1, d.loc['step_count'])):4.0%} {int(d.loc['direct_count']):>10,d} by direct references (i.e. parent records hard coded step),
-  - {float(d.loc['indirect_count'] / max(1, d.loc['step_count'])):4.0%} {int(d.loc['indirect_count']):>10,d} by indirect references (i.e. parent records "dict" id),
-```
-{b}
-
-"""
-    cells.append(nbf.v4.new_markdown_cell(cell))
-
-    # **************************************************************************
-    if summary_desc is not None:
-        cell = summary_desc
-        cells.append(nbf.v4.new_markdown_cell(cell))
-
+    """)
+    cell = kwargs.get('summary_desc')
+    if cell is not None: markdown(cell)
 
     # **************************************************************************
     # **************************************************************************
-    cell = f"""\
-### Objects Kind
+    markdown(f"""\
+    ### Objects Kind
 
-The following plot groups the objects into 10 categories:
-- 4 categories for contents, depending on their size,
-- 5 categories for inodes, depending on the size of the node they belong to,
-- 1 extra category for inodes that appear in several categories at once.
-"""
-    cells.append(nbf.v4.new_markdown_cell(cell))
-
-    # **************************************************************************
-    cell = f"""\
-plot_4_vertical_bubble_histo('/tmp/{fname}.csv',
-                           'ekind')"""
-    cells.append(nbf.v4.new_code_cell(cell))
-
-
-    # **************************************************************************
-    if kind_desc is not None:
-        cell = kind_desc
-        cells.append(nbf.v4.new_markdown_cell(cell))
-
+    The following plot groups the objects into 10 categories:
+    - 4 categories for contents, depending on their size,
+    - 5 categories for inodes, depending on the size of the node they belong to,
+    - 1 extra category for inodes that appear in several categories at once.
+    """)
+    code(f"""\
+    plot_4_vertical_bubble_histo('/tmp/{fname}.csv',
+                                 'ekind')""")
+    cell = kwargs.get('kind_desc')
+    if cell is not None: markdown(cell)
 
     # **************************************************************************
     # **************************************************************************
-    cell = f"""\
-### Objects Distance to Commit
+    markdown(f"""\
+    ### Objects Distance to Commit
 
-The following plot groups the objects into 5 categories, depending on their distance to the commit of the tree.
-For instance, `<1 cycle` implies that the objects in that row are less than 1 cycle away from the commit being analysed (i.e. less than 8200 blocks away, less than 3 days away).
+    The following plot groups the objects into 5 categories, depending on their distance to the commit of the tree.
+    For instance, `<1 cycle` implies that the objects in that row are less than 1 cycle away from the commit being analysed (i.e. less than 8200 blocks away, less than 3 days away).
 
-"""
-    cells.append(nbf.v4.new_markdown_cell(cell))
-
-    # **************************************************************************
-    cell = f"""\
-plot_4_vertical_bubble_histo('/tmp/{fname}.csv',
-                           'area_distance_from_origin')"""
-    cells.append(nbf.v4.new_code_cell(cell))
-
-
-    # **************************************************************************
-    if distance_desc is not None:
-        cell = distance_desc
-        cells.append(nbf.v4.new_markdown_cell(cell))
+    """)
+    code(f"""\
+    plot_4_vertical_bubble_histo('/tmp/{fname}.csv',
+                                 'area_distance_from_origin')""")
+    cell = kwargs.get('distance_desc')
+    if cell is not None: markdown(cell)
 
     if filter_name is None:
         # **************************************************************************
         # **************************************************************************
-        cell = f"""\
-### Objects Path
+        markdown(f"""\
+        ### Objects Path
 
-The following plot groups the objects into 4 categories, depending on their ancestor directory.
-    """
-        cells.append(nbf.v4.new_markdown_cell(cell))
-
-        # **************************************************************************
-        cell = f"""\
-plot_4_vertical_bubble_histo('/tmp/{fname}.csv',
-                           'path2')"""
-        cells.append(nbf.v4.new_code_cell(cell))
-
-        # **************************************************************************
-        if path2_desc is not None:
-            cell = path2_desc
-            cells.append(nbf.v4.new_markdown_cell(cell))
+        The following plot groups the objects into 4 categories, depending on their ancestor directory.
+        """)
+        code(f"""\
+        plot_4_vertical_bubble_histo('/tmp/{fname}.csv',
+                                     'path2')""")
+        cell = kwargs.get('path2_desc')
+        if cell is not None: markdown(cell)
 
         # **************************************************************************
         # **************************************************************************
-        cell = f"""\
-<br/>
+        markdown(f"""\
+        <br/>
 
-The following plot groups the objects on 8 interesting locations.
-"""
-        cells.append(nbf.v4.new_markdown_cell(cell))
+        The following plot groups the objects on 8 interesting locations.
+        """)
+        code(f"""\
+        plot_4_vertical_bubble_histo('/tmp/{fname}.csv',
+                                     'path3')""")
 
-        cell = f"""\
-plot_4_vertical_bubble_histo('/tmp/{fname}.csv',
-                           'path3')"""
-        cells.append(nbf.v4.new_code_cell(cell))
-
-        if path3_desc is not None:
-            cell = path3_desc
-            cells.append(nbf.v4.new_markdown_cell(cell))
+        cell = kwargs.get('path3_desc')
+        if cell is not None: markdown(cell)
 
         # **************************************************************************
         # **************************************************************************
-        cell = f"""\
-<br/>
+        markdown(f"""\
 
-The following plot groups the objects on their precise location.
-"""
-        cells.append(nbf.v4.new_markdown_cell(cell))
+        <br/>
 
-
-        cells.append(nbf.v4.new_code_cell(f"""\
-plot_4_vertical_bubble_histo('/tmp/{fname}.csv',
-                             'path')"""))
+        The following plot groups the objects on their precise location.
+        """)
+        code(f"""\
+        plot_4_vertical_bubble_histo('/tmp/{fname}.csv',
+                                     'path')""")
 
         # **************************************************************************
-        # if path3_desc is not None:
-            # cell = path3_desc
-            # cells.append(nbf.v4.new_markdown_cell(cell))
+        # **************************************************************************
+        markdown(f"""\
+        ### toto
 
+        toto
+        """)
+        code(f"""\
+        plot_grid_bubble_histo('/tmp/{fname}.csv',
+                               'bytes', 'area_distance_from_origin', 'ekind')""")
+        code(f"""\
+        plot_grid_bubble_histo('/tmp/{fname}.csv',
+                               'count', 'area_distance_from_origin', 'ekind')""")
 
-    # **************************************************************************
-    # **************************************************************************
-    cells.append(nbf.v4.new_markdown_cell(f"""\
-### toto
+        # **************************************************************************
+        # **************************************************************************
+        markdown(f"""\
+        ### toto
 
-toto
-"""))
-    cells.append(nbf.v4.new_code_cell(f"""\
-plot_grid_bubble_histo('/tmp/{fname}.csv',
-                       'bytes', 'area_distance_from_origin', 'ekind')"""))
-    cells.append(nbf.v4.new_code_cell(f"""\
-plot_grid_bubble_histo('/tmp/{fname}.csv',
-                       'count', 'area_distance_from_origin', 'ekind')"""))
+        toto
+        """)
+        code(f"""\
+        plot_grid_bubble_histo('/tmp/{fname}.csv',
+                               'bytes', 'area_distance_from_origin', 'path3')""")
+        code(f"""\
+        plot_grid_bubble_histo('/tmp/{fname}.csv',
+                               'count', 'area_distance_from_origin', 'path3')""")
 
-    # **************************************************************************
-    # **************************************************************************
-    cells.append(nbf.v4.new_markdown_cell(f"""\
-### toto
+        # **************************************************************************
+        # **************************************************************************
+        markdown(f"""\
+        ### toto
 
-toto
-"""))
-    cells.append(nbf.v4.new_code_cell(f"""\
-plot_grid_bubble_histo('/tmp/{fname}.csv',
-                       'bytes', 'area_distance_from_origin', 'path3')"""))
-    cells.append(nbf.v4.new_code_cell(f"""\
-plot_grid_bubble_histo('/tmp/{fname}.csv',
-                       'count', 'area_distance_from_origin', 'path3')"""))
-
-    # **************************************************************************
-    # **************************************************************************
-    cells.append(nbf.v4.new_markdown_cell(f"""\
-### toto
-
-toto
-"""))
-    cells.append(nbf.v4.new_code_cell(f"""\
-plot_grid_bubble_histo('/tmp/{fname}.csv',
-                       'bytes', 'ekind', 'path3')"""))
-    cells.append(nbf.v4.new_code_cell(f"""\
-plot_grid_bubble_histo('/tmp/{fname}.csv',
-                       'count', 'ekind', 'path3')"""))
+        toto
+        """)
+        code(f"""\
+        plot_grid_bubble_histo('/tmp/{fname}.csv',
+                               'bytes', 'ekind', 'path3')""")
+        code(f"""\
+        plot_grid_bubble_histo('/tmp/{fname}.csv',
+                               'count', 'ekind', 'path3')""")
 
 
     # **************************************************************************
