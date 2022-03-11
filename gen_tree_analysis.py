@@ -200,11 +200,12 @@ def on_averaged_tree(df, fname, block_desc, block_subdesc, path_zoom=None):
     }.get(block_desc, {}).get(path_zoom)
     if cell is not None: markdown(cell)
 
+    # **************************************************************************
+    # **************************************************************************
     if path_zoom is None:
-        # **************************************************************************
-        # **************************************************************************
         markdown(f"""\
         ### Objects Path
+        ##### 4 categories
 
         The following plot groups the objects into 4 categories, depending on their ancestor directory.
         """)
@@ -222,11 +223,8 @@ def on_averaged_tree(df, fname, block_desc, block_subdesc, path_zoom=None):
         if cell is not None: markdown(cell)
 
     if path_zoom is None:
-        # **************************************************************************
-        # **************************************************************************
         markdown(f"""\
-        <br/>
-
+        ##### 8 categories
         The following plot is very similar to the previous one. It groups the objects on 8 interesting locations.
 
         These paths are also individually analysed in separate files.
@@ -251,12 +249,8 @@ def on_averaged_tree(df, fname, block_desc, block_subdesc, path_zoom=None):
         if cell is not None: markdown(cell)
 
     if path_zoom is None:
-        # **************************************************************************
-        # **************************************************************************
         markdown(f"""\
-
-        <br/>
-
+        ##### 100+ categories
         The following plot groups the objects on their precise location.
         """)
         code(f"""\
@@ -269,42 +263,81 @@ def on_averaged_tree(df, fname, block_desc, block_subdesc, path_zoom=None):
         }.get(block_desc, {}).get(path_zoom)
         if cell is not None: markdown(cell)
 
-    # if True:
-    if path_zoom is None:
-        # **************************************************************************
-        # **************************************************************************
-        markdown(f"""\
-        ### toto
+    # **************************************************************************
+    # **************************************************************************
 
-        toto
+    if path_zoom is None:
+        markdown(f"""\
+        ### Distance to Commit x Kind
+        The following plots groups the objects in 2 grids.
+
+        ##### Nodes
+        This plot groups the nodes in 25 categories in order to highlight when the nodes were modified (or added), depending on their size.
         """)
         code(f"""\
         plot_grid_bubble_histo('/tmp/{fname}.csv',
-                               'bytes', 'area_distance_from_origin', 'ekind')""")
-        code(f"""\
-        plot_grid_bubble_histo('/tmp/{fname}.csv',
-                               'count', 'area_distance_from_origin', 'ekind')""")
+                               'node_count', 'area_distance_from_origin', 'ekind', elide_empty_rows=True)""")
         cell = {
             'block level 2,056,194': {
-                None: None,
+                None: """
+                💡 90% of the nodes are small and were not modified during the last 4 cycles.
+
+                💡 Almost all the massive nodes were modified during the last cycle (72 out of 94).
+                """
             },
         }.get(block_desc, {}).get(path_zoom)
         if cell is not None: markdown(cell)
 
     if path_zoom is None:
-        # **************************************************************************
-        # **************************************************************************
         markdown(f"""\
-        ### toto
+        ##### Bytes
+        This plot groups the objects in 50 categories in order to highlight where are located the bytes of the tree.
+        """)
+        code(f"""\
+        plot_grid_bubble_histo('/tmp/{fname}.csv',
+                               'bytes', 'area_distance_from_origin', 'ekind', elide_empty_rows=True)""")
+        cell = {
+            'block level 2,056,194': {
+                None: """
+                💡 The massive nodes weigh 46% of the tree, but they dominate in the last columns, suggesting that their modification is costing a lot.
+                """,
+            },
+        }.get(block_desc, {}).get(path_zoom)
+        if cell is not None: markdown(cell)
 
-        toto
+    # **************************************************************************
+    # **************************************************************************
+
+    if path_zoom is None:
+        markdown(f"""\
+        ### Distance to Commit x Path
+        ##### Bytes
+
+        This plot groups the objects in 40 categories in order to highlight where are located the bytes of the tree.
         """)
         code(f"""\
         plot_grid_bubble_histo('/tmp/{fname}.csv',
                                'bytes', 'area_distance_from_origin', 'path3')""")
+        cell = {
+            'block level 2,056,194': {
+                None: """
+                💡 The nodes at `/data/big_maps/index/*/contents` weigh 43% of the tree, but they dominate the last columns, suggesting that their modification is costing a lot.
+                """,
+            },
+        }.get(block_desc, {}).get(path_zoom)
+        if cell is not None: markdown(cell)
+
+    # **************************************************************************
+    # **************************************************************************
+    if path_zoom is None:
+        markdown(f"""\
+        ### Kind x Path
+        ##### Nodes
+        This plot groups the nodes in 40 categories in order to highlight where can be found the nodes of each size.
+        """)
         code(f"""\
         plot_grid_bubble_histo('/tmp/{fname}.csv',
-                               'count', 'area_distance_from_origin', 'path3')""")
+                               'node_count', 'ekind', 'path3', elide_empty_cols=True)""")
         cell = {
             'block level 2,056,194': {
                 None: None,
@@ -313,19 +346,14 @@ def on_averaged_tree(df, fname, block_desc, block_subdesc, path_zoom=None):
         if cell is not None: markdown(cell)
 
     if path_zoom is None:
-        # **************************************************************************
-        # **************************************************************************
         markdown(f"""\
-        ### toto
+        ##### Bytes
 
-        toto
+        This plot groups the objects in 80 categories in order to highlight where are located the bytes of the tree.
         """)
         code(f"""\
         plot_grid_bubble_histo('/tmp/{fname}.csv',
                                'bytes', 'ekind', 'path3')""")
-        code(f"""\
-        plot_grid_bubble_histo('/tmp/{fname}.csv',
-                               'count', 'ekind', 'path3')""")
         cell = {
             'block level 2,056,194': {
                 None: None,

@@ -80,15 +80,28 @@ right_discriminator = 'ekind'
 # top_discriminator = 'area_distance_from_origin'
 # right_discriminator = 'ekind'
 # if True:
-def plot_grid_bubble_histo(csv_path, indicator, top_discriminator, right_discriminator):
+def plot_grid_bubble_histo(csv_path, indicator, top_discriminator, right_discriminator,
+                           elide_empty_rows=False, elide_empty_cols=False):
     df = pd.read_csv(csv_path)
     df = df.groupby([right_discriminator, top_discriminator])[indicator].sum().reset_index()
     df = df.pivot(right_discriminator, top_discriminator, indicator).fillna(0)
 
     row_names = list(rows[right_discriminator].keys())
+    if elide_empty_rows:
+        row_names = [
+            x
+            for x in row_names
+            if df.loc[x].sum() > 0
+        ]
     ylabs = [rows[right_discriminator][x] for x in row_names]
 
     col_names = list(rows[top_discriminator].keys())
+    if elide_empty_cols:
+        col_names = [
+            x
+            for x in col_names
+            if df[x].sum() > 0
+        ]
     if top_discriminator == 'area_distance_from_origin':
         col_names = col_names[::-1]
     xlabs = [rows[top_discriminator][x] for x in col_names]

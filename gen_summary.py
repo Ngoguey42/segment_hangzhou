@@ -11,6 +11,8 @@ This document presents statistics computed on a pack file which results from a T
 
 This work is splited on several documents. Look for the "💡" for insights.
 
+The raw data used for this document can be found at `csv/*csv` in the same repository.
+
 ### Contents of the Pack File
 
 This bootstrap was realised using Irmin 3.0 and its new structured keys, using the "minimal" indexing strategy, which results in less sharing in the pack file.

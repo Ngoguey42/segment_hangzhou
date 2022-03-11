@@ -33,6 +33,7 @@
    - Distribution of length in direct steps
    - in full file, infos on steps
    - size of the unshared tree. i.e. if the DAG is made a tree.
+   - which paths are new compared to the previous cycle
    TODO: Some multiples might be missing because of the star aliasing
    TODO: When I reason about size of directories I'm not counting the multiples
    TODO: "/" is missing from paths...
