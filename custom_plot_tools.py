@@ -219,14 +219,16 @@ def plot_4_vertical_bubble_histo(csv_path, discriminator):
     xborder = 0.4
     xshift = 1.3
     cols = [
-        'node_count',
         'blob_count',
+        'node_count',
+        'inner_count',
         'count',
         'bytes',
     ]
     xlabs = [
-        'node count',
         'contents count',
+        'node count',
+        'hidden node count',
         'object count',
         'byte count',
     ]
@@ -235,8 +237,10 @@ def plot_4_vertical_bubble_histo(csv_path, discriminator):
         xborder + 0.5 + xshift * 1,
         xborder + 0.5 + xshift * 2,
         xborder + 0.5 + xshift * 3,
+        xborder + 0.5 + xshift * 4,
     ]
     fmts = [
+        fmt_count,
         fmt_count,
         fmt_count,
         fmt_count,

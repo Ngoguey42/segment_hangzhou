@@ -32,6 +32,7 @@
      traversal of all commits.
    - Distribution of length in direct steps
    - in full file, infos on steps
+   - size of the unshared tree. i.e. if the DAG is made a tree.
    TODO: Some multiples might be missing because of the star aliasing
    TODO: When I reason about size of directories I'm not counting the multiples
    TODO: "/" is missing from paths...
@@ -84,6 +85,7 @@
   - An area contains roughly as many entries as one tree, but 2x more bytes
   - There are massive directories in [/data/big_maps/index/*/contents]
     - 58 inode trees with 11_017_653 steps, (10_796_975 which are direct and that take 701_803_429 byte)
+  - The pack file grows 1GB per day
 
 
 
