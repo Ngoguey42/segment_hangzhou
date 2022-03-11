@@ -22,9 +22,7 @@ def trimleft(txt):
     ]
     return '\n'.join(lines)
 
-def on_averaged_tree(df, fname, block_desc, block_subdesc, filter_name=None, **kwargs):
-                     # summary_desc=None,
-                     # kind_desc=None, distance_desc=None, path2_desc=None, path3_desc=None):
+def on_averaged_tree(df, fname, block_desc, block_subdesc, path_zoom=None):
     print('Generating', fname)
     nb = nbf.v4.new_notebook()
     cells = []
@@ -35,12 +33,14 @@ def on_averaged_tree(df, fname, block_desc, block_subdesc, filter_name=None, **k
 
     # **************************************************************************
     # **************************************************************************
-    if filter_name is None:
+    if path_zoom is None:
         a = ""
+    elif '*' in path_zoom:
+        a = f'##### zoom on this node: {path_zoom}'
     else:
-        a = f'##### {filter_name}'
+        a = f'##### zoom on this set of nodes: {path_zoom}'
     markdown(f"""\
-    # Analysis of the Irmin tree of {block_desc}
+    # Analysis of the tree of the commit belonging to {block_desc}
     ### which is {block_subdesc}
 
     {a}
@@ -54,33 +54,45 @@ def on_averaged_tree(df, fname, block_desc, block_subdesc, filter_name=None, **k
     # **************************************************************************
     # **************************************************************************
     d = df[indicators].sum()
-    if filter_name is None:
+    if path_zoom is None:
         a = " (i.e. number of directories)"
-        b = "Side note: The difference between `directories` and `objects` is due to sharing of objects, i.e. may objects are referenced by several paths."
+        b = "Side note: The difference between the number of steps and the number of contents+nodes is due to sharing of objects, i.e. objects may be referenced by several paths."
     else:
         a = " (i.e. number of children in the nodes)"
         b = ""
     markdown(f"""\
     ### Summary
     ```
-    Number of bytes: {int(d.loc['bytes']):,d}. Breakdown:
-    - {float(d.loc['header_bytes'] / max(1, d.loc['bytes'])):4.0%} {int(d.loc['header_bytes']):>11,d}B in 32 byte hash of objects,
-    - {float(d.loc['direct_bytes'] / max(1, d.loc['bytes'])):4.0%} {int(d.loc['direct_bytes']):>11,d}B in hard coded steps (a.k.a. direct step),
-    - {float(d.loc['other_bytes'] / max(1, d.loc['bytes'])):4.0%} {int(d.loc['other_bytes']):>11,d}B elsewhere (i.e. length segment + value segment).
-
     Number of objects: {int(d.loc['count']):,d} (a.k.a. pack file entries). Breakdown:
-    - {float(d.loc['blob_count'] / max(1, d.loc['count'])):4.0%} {int(d.loc['blob_count']):>10,d} contents (a.k.a. blobs),
-    - {float(d.loc['node_count'] / max(1, d.loc['count'])):4.0%} {int(d.loc['node_count']):>10,d} nodes (a.k.a. root inodes, directory),
+    - {float(d.loc['blob_count'] / max(1, d.loc['count'])):4.0%} {int(d.loc['blob_count']):>10,d} contents (a.k.a. blobs);
+    - {float(d.loc['node_count'] / max(1, d.loc['count'])):4.0%} {int(d.loc['node_count']):>10,d} nodes (a.k.a. root inodes, directories);
     - {float(d.loc['inner_count'] / max(1, d.loc['count'])):4.0%} {int(d.loc['inner_count']):>10,d} hidden nodes (a.k.a. non-root inodes).
 
+    Number of bytes: {int(d.loc['bytes']):,d}. Breakdown:
+    - {float(d.loc['header_bytes'] / max(1, d.loc['bytes'])):4.0%} {int(d.loc['header_bytes']):>11,d}B used by the 32 byte hash that prefixes all objects;
+    - {float(d.loc['direct_bytes'] / max(1, d.loc['bytes'])):4.0%} {int(d.loc['direct_bytes']):>11,d}B used in hard coded steps (a.k.a. direct step) (a step is a file name or a directory name, it is a step in a path);
+    - {float(d.loc['other_bytes'] / max(1, d.loc['bytes'])):4.0%} {int(d.loc['other_bytes']):>11,d}B elsewhere (i.e. length segment + value segment).
+
     Number of steps: {int(d.loc['step_count']):,d}{a}. Breakdown:
-    - {float(d.loc['direct_count'] / max(1, d.loc['step_count'])):4.0%} {int(d.loc['direct_count']):>10,d} by direct references (i.e. parent records hard coded step),
+    - {float(d.loc['direct_count'] / max(1, d.loc['step_count'])):4.0%} {int(d.loc['direct_count']):>10,d} by direct references (i.e. parent records hard coded step);
     - {float(d.loc['indirect_count'] / max(1, d.loc['step_count'])):4.0%} {int(d.loc['indirect_count']):>10,d} by indirect references (i.e. parent records "dict" id),
     ```
     {b}
 
     """)
-    cell = kwargs.get('summary_desc')
+    cell = {
+        'block level 2,056,194': {
+            None: None,
+            '/data/big_maps/index/*/contents': f"""
+            💡 The steps all have length 65 here. They represent 818MB out of the 2.5GB that the full tree weighs.
+            """,
+            '/data/big_maps/index/*/contents/*': None,
+            '/data/big_maps/index/*/contents/*/data': None,
+            '/data/contracts/index': None,
+            '/data/contracts/index/*': None,
+            '/data/contracts/index/*/manager': None,
+        },
+    }.get(block_desc, {}).get(path_zoom)
     if cell is not None: markdown(cell)
 
     # **************************************************************************
@@ -96,7 +108,23 @@ def on_averaged_tree(df, fname, block_desc, block_subdesc, filter_name=None, **k
     code(f"""\
     plot_4_vertical_bubble_histo('/tmp/{fname}.csv',
                                  'ekind')""")
-    cell = kwargs.get('kind_desc')
+    cell = {
+        'block level 2,056,194': {
+            None: f"""\
+            💡 94 nodes have a length greater than 16k, they make up 46% of the bytes of the tree.
+
+            💡 Almost all nodes are small (i.e. with a length of 32 or less)
+            """,
+            '/data/big_maps/index/*/contents': f"""
+            💡 The 62 very large nodes weigh almost 1GB, while the full tree weighs 2.5GB.
+            """,
+            '/data/big_maps/index/*/contents/*': None,
+            '/data/big_maps/index/*/contents/*/data': None,
+            '/data/contracts/index': None,
+            '/data/contracts/index/*': None,
+            '/data/contracts/index/*/manager': None,
+        },
+    }.get(block_desc, {}).get(path_zoom)
     if cell is not None: markdown(cell)
 
     # **************************************************************************
@@ -105,16 +133,36 @@ def on_averaged_tree(df, fname, block_desc, block_subdesc, filter_name=None, **k
     ### Objects Distance to Commit
 
     The following plot groups the objects into 5 categories, depending on their distance to the commit of the tree.
-    For instance, `<1 cycle` implies that the objects in that row are less than 1 cycle away from the commit being analysed (i.e. less than 8200 blocks away, less than 3 days away).
+    For instance, `<1 cycle` implies that the objects in that row are less than 1 cycle away from
+    the commit being analysed (i.e. less than 8200 blocks away, less than 3 days away).
 
     """)
     code(f"""\
     plot_4_vertical_bubble_histo('/tmp/{fname}.csv',
                                  'area_distance_from_origin')""")
-    cell = kwargs.get('distance_desc')
+    cell = {
+        'block level 2,056,194': {
+            None: f"""\
+            💡 A single cycle doesn't modifies a lot the Irmin tree.
+            """,
+            '/data/big_maps/index/*/contents': None,
+            '/data/big_maps/index/*/contents/*': None,
+            '/data/big_maps/index/*/contents/*/data': None,
+            '/data/contracts/index': f"""
+            💡 This directory is modified all the time (most likely at every block). A new root inode has to be re-commited
+            every time it is modified, this is why the bubble for "node count" shows on the first row.
+            """,
+            '/data/contracts/index/*': f"""\
+            💡 124.4k contracts were modified (or added) during the last cycle.
+
+            💡 14.5k contracts were modified (or added) 2 cycles ago and were not modified since.
+            """,
+            '/data/contracts/index/*/manager': None,
+        },
+    }.get(block_desc, {}).get(path_zoom)
     if cell is not None: markdown(cell)
 
-    if filter_name is None:
+    if path_zoom is None:
         # **************************************************************************
         # **************************************************************************
         markdown(f"""\
@@ -125,7 +173,20 @@ def on_averaged_tree(df, fname, block_desc, block_subdesc, filter_name=None, **k
         code(f"""\
         plot_4_vertical_bubble_histo('/tmp/{fname}.csv',
                                      'path2')""")
-        cell = kwargs.get('path2_desc')
+
+        cell = {
+            'block level 2,056,194': {
+                None: f"""\
+                💡 Almost all the data is contained in `big_maps` and `contracts`.
+                """,
+                '/data/big_maps/index/*/contents': None,
+                '/data/big_maps/index/*/contents/*': None,
+                '/data/big_maps/index/*/contents/*/data': None,
+                '/data/contracts/index': None,
+                '/data/contracts/index/*': None,
+                '/data/contracts/index/*/manager': None,
+            },
+        }.get(block_desc, {}).get(path_zoom)
         if cell is not None: markdown(cell)
 
         # **************************************************************************
@@ -139,7 +200,23 @@ def on_averaged_tree(df, fname, block_desc, block_subdesc, filter_name=None, **k
         plot_4_vertical_bubble_histo('/tmp/{fname}.csv',
                                      'path3')""")
 
-        cell = kwargs.get('path3_desc')
+        cell = {
+            'block level 2,056,194': {
+                None: f"""\
+                💡 The `/data/contracts/index` directory is made of nearly 1 million inodes.
+                It points to nearly 2 million nodes (i.e. `/data/contracts/index/*`).
+                (Technically it points to `2,003,307` nodes but only `1,988,785` objects due to sharing).
+
+                These paths are also individually analysed in separate files.
+                """,
+                '/data/big_maps/index/*/contents': None,
+                '/data/big_maps/index/*/contents/*': None,
+                '/data/big_maps/index/*/contents/*/data': None,
+                '/data/contracts/index': None,
+                '/data/contracts/index/*': None,
+                '/data/contracts/index/*/manager': None,
+            },
+        }.get(block_desc, {}).get(path_zoom)
         if cell is not None: markdown(cell)
 
         # **************************************************************************
@@ -153,6 +230,18 @@ def on_averaged_tree(df, fname, block_desc, block_subdesc, filter_name=None, **k
         code(f"""\
         plot_4_vertical_bubble_histo('/tmp/{fname}.csv',
                                      'path')""")
+        cell = {
+            'block level 2,056,194': {
+                None: None,
+                '/data/big_maps/index/*/contents': None,
+                '/data/big_maps/index/*/contents/*': None,
+                '/data/big_maps/index/*/contents/*/data': None,
+                '/data/contracts/index': None,
+                '/data/contracts/index/*': None,
+                '/data/contracts/index/*/manager': None,
+            },
+        }.get(block_desc, {}).get(path_zoom)
+        if cell is not None: markdown(cell)
 
         # **************************************************************************
         # **************************************************************************
@@ -167,6 +256,18 @@ def on_averaged_tree(df, fname, block_desc, block_subdesc, filter_name=None, **k
         code(f"""\
         plot_grid_bubble_histo('/tmp/{fname}.csv',
                                'count', 'area_distance_from_origin', 'ekind')""")
+        cell = {
+            'block level 2,056,194': {
+                None: None,
+                '/data/big_maps/index/*/contents': None,
+                '/data/big_maps/index/*/contents/*': None,
+                '/data/big_maps/index/*/contents/*/data': None,
+                '/data/contracts/index': None,
+                '/data/contracts/index/*': None,
+                '/data/contracts/index/*/manager': None,
+            },
+        }.get(block_desc, {}).get(path_zoom)
+        if cell is not None: markdown(cell)
 
         # **************************************************************************
         # **************************************************************************
@@ -181,6 +282,18 @@ def on_averaged_tree(df, fname, block_desc, block_subdesc, filter_name=None, **k
         code(f"""\
         plot_grid_bubble_histo('/tmp/{fname}.csv',
                                'count', 'area_distance_from_origin', 'path3')""")
+        cell = {
+            'block level 2,056,194': {
+                None: None,
+                '/data/big_maps/index/*/contents': None,
+                '/data/big_maps/index/*/contents/*': None,
+                '/data/big_maps/index/*/contents/*/data': None,
+                '/data/contracts/index': None,
+                '/data/contracts/index/*': None,
+                '/data/contracts/index/*/manager': None,
+            },
+        }.get(block_desc, {}).get(path_zoom)
+        if cell is not None: markdown(cell)
 
         # **************************************************************************
         # **************************************************************************
@@ -195,6 +308,18 @@ def on_averaged_tree(df, fname, block_desc, block_subdesc, filter_name=None, **k
         code(f"""\
         plot_grid_bubble_histo('/tmp/{fname}.csv',
                                'count', 'ekind', 'path3')""")
+        cell = {
+            'block level 2,056,194': {
+                None: None,
+                '/data/big_maps/index/*/contents': None,
+                '/data/big_maps/index/*/contents/*': None,
+                '/data/big_maps/index/*/contents/*/data': None,
+                '/data/contracts/index': None,
+                '/data/contracts/index/*': None,
+                '/data/contracts/index/*/manager': None,
+            },
+        }.get(block_desc, {}).get(path_zoom)
+        if cell is not None: markdown(cell)
 
 
     # **************************************************************************
@@ -248,62 +373,7 @@ on_averaged_tree(
     block_desc="block level 2,056,194",
     block_subdesc="the second block of cycle 445 (created on Jan 23, 2022)",
     fname='tree_of_cycle_445.ipynb',
-    kind_desc = f"""\
-💡 94 nodes have a length greater than 16k, they make up 46% of the bytes of the tree.
-
-💡 Almost all nodes are small (i.e. with a length of 32 or less)
-""",
-    distance_desc = f"""\
-💡 A single cycle doesn't modifies a lot the Irmin tree.
-""",
-    path2_desc= f"""\
-💡 Almost all the data is contained in `big_maps` and `contracts`.
-""",
-    path3_desc= f"""\
-💡 The `/data/contracts/index` directory is made of nearly 1 million inodes. It points to nearly 2 million nodes (i.e. `/data/contracts/index/*`). (Technically it points to `2,003,307` nodes but only `1,988,785` objects due to sharing)
-
-These paths are also individually analysed in separate files.
-
-""",
 )
-
-d = df.set_index('parent_cycle_start').loc[445].query('path3 == "/data/contracts/index"').reset_index(drop=True)
-on_averaged_tree(
-    d,
-    block_desc="block level 2,056,194",
-    block_subdesc="the second block of cycle 445 (created on Jan 23, 2022)",
-    fname='tree_of_cycle_445_contracts-index.ipynb',
-    filter_name='zoom on this node: `/data/contracts/index`',
-)
-
-descs = {
-    '/data/contracts/index/*/manager': dict(
-#         distance_desc = f"""\
-# 💡 Very few new "manager" contents enter the pack file on the last cycles. However, many new contracts enter the pack file on these cycles (see `/data/contracts/index/*` [(url)](./tree_of_cycle_445_contracts-index-star.ipynb)), it implies that the new contracts share the "manager" files with the older contracts.
-# """,
-    ),
-    '/data/contracts/index': dict(
-        distance_desc = f"""\
-💡 This directory is modified all the time (most likely at every block). A new root inode has to be re-commited every time it is modified, this is why the bubble for "node count" shows on the first row.
-""",
-    ),
-    '/data/contracts/index/*': dict(
-        distance_desc = f"""\
-💡 124.4k contracts were modified (or added) during the last cycle.
-
-💡 14.5k contracts were modified (or added) 2 cycles ago and were not modified since.
-""",
-    ),
-    '/data/big_maps/index/*/contents': dict(
-    kind_desc = f"""\
-💡 The 62 very large nodes weigh almost 1GB, while the full tree weighs 2.5GB.
-""",
-    summary_desc = f"""\
-💡 The steps all have length 65 here. They represent 818MB out of the 2.5GB that the full tree weighs.
-""",
-
-    )
-}
 
 for p in [
         '/data/big_maps/index/*/contents',
@@ -320,8 +390,7 @@ for p in [
         block_desc="block level 2,056,194",
         block_subdesc="the second block of cycle 445 (created on Jan 23, 2022)",
         fname=f'tree_of_cycle_445_{q}.ipynb',
-        filter_name=f'zoom on this node: `{p}`',
-        **(descs.get(p, {})),
+        path_zoom=p,
     )
 
 

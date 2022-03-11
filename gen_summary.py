@@ -11,13 +11,13 @@ This document presents statistics computed on a pack file which results from a T
 
 This bootstrap was realised using Irmin 3.0 and its new structured keys, using the "minimal" indexing strategy, which results in less sharing in the pack file.
 
-The first commit of the pack file is the one belonging to the block 1,916,930 (2nd of Hangzhou, 2nd of cycle 429, 4 Dec 2021).
+The first commit of the pack file belongs to block 1,916,930 (2nd of Hangzhou, 2nd of cycle 429, 4 Dec 2021).
 
-The last commit of the pack file is the one belonging to the block 2,056,194 (2nd of cycle 445, 23 Jan 2022).
+The last commit annalised belongs to block 2,056,194 (2nd of cycle 445, 23 Jan 2022).
 
-In Irmin, a commit points to a root node (i.e. "/"), which itself reference contents and sub-directories. All these objects constitue the tree of the commit.
+In Irmin, a commit points to a root node (i.e. "/"), which itself references contents and sub-directories. The root node and all the objects reachable from it constitue "the tree of a commit".
 
-This work is splited on several documents. Look for the "💡" for insights of the data.
+This work is splited on several documents. Look for the "💡" for insights on what is showed.
 
 The tree of the last commit of the pack file is analysed in depth in these notebooks:
 - [tree_of_cycle_445.ipynb](./tree_of_cycle_445.ipynb) details the contents of the block,
