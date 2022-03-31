@@ -13,9 +13,6 @@ def trimleft(txt):
         for l in lines
         if l != ''
     )
-    # print('[[[' + txt + ']]]')
-    # print('indentation', indentation)
-    # assert indentation > 0
     lines = [
         l[indentation:]
         for l in lines
@@ -82,13 +79,15 @@ def on_averaged_tree(df, fname, block_desc, block_subdesc, path_zoom=None):
             💡 The dict stores steps so that the pack file can store integers instead of repeatedly hard coding strings.
             The dict has a maximum size of 100_000.
             When the dict is full, all the new steps are stored "direct"ly in the pack file.
+
+            💡 40% of the bytes of the tree occupied by hard-coded steps is a lot, but maybe it's legit. An investigation is in order.
             """,
             # contracts
             '/data/contracts/index': f"""
-            💡 The steps here are hashes. The fact that they are all "direct" is OK. The dict is not made for storings strings that occur often.
+            💡 The steps here are hashes. The fact that they are all "direct" is OK. The dict is made for storings strings that occur often.
             """,
             '/data/contracts/index/*': f"""
-            💡 There are only 13 different steps that can be found here (e.g. "manager", "delegate"), the fact that 99%
+            💡 There are only 13 unique steps that can be found here (e.g. "manager", "delegate"), the fact that 99%
             of them are "direct" suggests a problem with the "dict".
             """,
             '/data/contracts/index/*/manager': """
@@ -96,8 +95,8 @@ def on_averaged_tree(df, fname, block_desc, block_subdesc, path_zoom=None):
             """,
             # big_maps
             '/data/big_maps/index/*/contents': f"""
-            💡 The steps all have length 65 here. They represent 818MB out of the 2.5GB that the full tree weighs. If there are many duplicates,
-            something could maybe be done.
+            💡 The steps all have length 65 here. They represent 818MB out of the 2.5GB that the full tree weighs.
+            If there are many duplicates, something could maybe be done.
 
             💡 The indirect steps might be cluttering the dict.
             """,
@@ -117,7 +116,9 @@ def on_averaged_tree(df, fname, block_desc, block_subdesc, path_zoom=None):
     The following plot groups the objects into 10 categories:
     - 4 categories for contents, depending on their size,
     - 5 categories for inodes, depending on the size of the node they belong to,
-    - 1 extra category for inodes that appear in several categories at once.
+    - 1 extra category for inodes that appear in several categories at once. (No need to overthink that category)
+
+    __Each column in such a graph sum to 100%__.
     """)
     code(f"""\
     plot_4_vertical_bubble_histo('/tmp/{fname}.csv',
@@ -125,9 +126,13 @@ def on_averaged_tree(df, fname, block_desc, block_subdesc, path_zoom=None):
     cell = {
         'block level 2,056,194': {
             None: f"""\
+            💡 The 3.7 million contents of length 0-31 take 46.7 bytes each on average. This result
+            is correct, it reflects the fact that all objects in irmin-pack are prefixed by a 32 byte
+            hash, which represents a huge overhead for these small contents.
+
             💡 94 nodes have a length greater than 16k, they make up 46% of the bytes of the tree.
 
-            💡 Almost all nodes are small (i.e. with a length of 32 or less), but they only constitute 20% of the bytes of the tree.
+            💡 Almost all nodes are small (i.e. with a length of 32 or less), but they only represent 20% of the bytes of the tree.
             """,
             # contracts
             '/data/contracts/index': None,
@@ -168,11 +173,11 @@ def on_averaged_tree(df, fname, block_desc, block_subdesc, path_zoom=None):
     cell = {
         'block level 2,056,194': {
             None: f"""\
-            💡 5% of the objects of the tree were created during cycle 444.
+            💡 5% of the objects of the tree were created during cycle 444. Reminder: we are looking at cycle 445.
 
-            💡 While cycle 444 pushed 3149MB to the pack file, only 267MB are still useful for cycle 445 (8%).
+            💡 While cycle 444 pushed 3149MB to the pack file (not visible here), only 267MB (sum of the 1st row) are still useful for cycle 445 (8%).
 
-            💡 While cycle 441 pushed 3474MB to the pack file, only 95MB are still useful for cycle 445 (3%).
+            💡 While cycle 441 pushed 3474MB to the pack file (not visible here), only 95MB (sum of the 4th row) are still useful for cycle 445 (3%).
             """,
             # contracts
             '/data/contracts/index': f"""
@@ -192,8 +197,8 @@ def on_averaged_tree(df, fname, block_desc, block_subdesc, path_zoom=None):
             # big_maps
             '/data/big_maps/index/*/contents': None,
             '/data/big_maps/index/*/contents/*': """
-            💡 Each cycle adds (or modifies) around 130k new unique entries in "data/big_maps/index/*/contents".
-            The fact that there is no peak at `<1 cycle` suggests that these contents are never modified when they are pushed to the tree.
+            💡 Each cycle adds (or modifies) around 130k new unique entries in `data/big_maps/index/*/contents`.
+            The fact that there is no peak at `<1 cycle` suggests that these directories are never modified when they are pushed to the tree.
             """,
             '/data/big_maps/index/*/contents/*/data': None,
         },
@@ -225,9 +230,9 @@ def on_averaged_tree(df, fname, block_desc, block_subdesc, path_zoom=None):
     if path_zoom is None:
         markdown(f"""\
         ##### 8 categories
-        The following plot is very similar to the previous one. It groups the objects on 8 interesting locations.
+        The following plot is very similar to the previous one, but it groups the objects on 8 interesting locations.
 
-        These paths are also individually analysed in separate files.
+        These paths are also individually analysed in separate files that you may find by going back to the index.
         """)
         code(f"""\
         plot_4_vertical_bubble_histo('/tmp/{fname}.csv',
@@ -238,10 +243,10 @@ def on_averaged_tree(df, fname, block_desc, block_subdesc, path_zoom=None):
                 None: f"""\
                 💡 The `/data/contracts/index` directory is made of nearly 1 million inodes.
                 It points to nearly 2 million nodes (i.e. `/data/contracts/index/*`).
-                (In practice, it points to `2,003,307` nodes but only `1,988,785` objects due to sharing).
+                (In practice, it points to `2,003,307` nodes (not visible here) but only `1,988,785` objects due to sharing).
                 See [tree_of_cycle_445_contracts-index.ipynb](./tree_of_cycle_445_contracts-index.ipynb).
 
-                💡 The `/data/big_maps/index/*/contents` directory has `13,890,632` sub-directories, but they
+                💡 The `/data/big_maps/index/*/contents` directories have `13,890,632` sub-directories (not visible here), but they
                 are only `5,067,232` unique sub-directories, thanks to sharing.
                 """,
             },
@@ -251,7 +256,7 @@ def on_averaged_tree(df, fname, block_desc, block_subdesc, path_zoom=None):
     if path_zoom is None:
         markdown(f"""\
         ##### 100+ categories
-        The following plot groups the objects on their precise location.
+        The following plot groups the objects given their precise location.
         """)
         code(f"""\
         plot_4_vertical_bubble_histo('/tmp/{fname}.csv',
@@ -273,6 +278,8 @@ def on_averaged_tree(df, fname, block_desc, block_subdesc, path_zoom=None):
 
         ##### Nodes
         This plot groups the nodes in 25 categories in order to highlight when the nodes were modified (or added), depending on their size.
+
+        __All the points in such a grid grid sum to 100%.__
         """)
         code(f"""\
         plot_grid_bubble_histo('/tmp/{fname}.csv',
@@ -282,7 +289,7 @@ def on_averaged_tree(df, fname, block_desc, block_subdesc, path_zoom=None):
                 None: """
                 💡 90% of the nodes are small and were not modified during the last 4 cycles.
 
-                💡 Almost all the massive nodes were modified during the last cycle (72 out of 94).
+                💡 Almost all the massive nodes were modified during the last cycle (73 out of 94).
                 """
             },
         }.get(block_desc, {}).get(path_zoom)
@@ -299,7 +306,7 @@ def on_averaged_tree(df, fname, block_desc, block_subdesc, path_zoom=None):
         cell = {
             'block level 2,056,194': {
                 None: """
-                💡 The massive nodes weigh 46% of the tree, but they dominate in the last columns, suggesting that their modification is costing a lot.
+                💡 The massive nodes weigh 46% of the tree (sum of the penultimate row), but they completely dominate in the last columns, suggesting that their modification is costing a lot.
                 """,
             },
         }.get(block_desc, {}).get(path_zoom)
@@ -340,7 +347,9 @@ def on_averaged_tree(df, fname, block_desc, block_subdesc, path_zoom=None):
                                'node_count', 'ekind', 'path3', elide_empty_cols=True)""")
         cell = {
             'block level 2,056,194': {
-                None: None,
+                None: """
+                💡 There are 2 million contracts but there are only 70k directories in all contracts. On of these directories has a size of >16k children.
+                """,
             },
         }.get(block_desc, {}).get(path_zoom)
         if cell is not None: markdown(cell)
@@ -349,14 +358,18 @@ def on_averaged_tree(df, fname, block_desc, block_subdesc, path_zoom=None):
         markdown(f"""\
         ##### Bytes
 
-        This plot groups the objects in 80 categories in order to highlight where are located the bytes of the tree.
+        This plot groups the objects in 80 categories in order to highlight what exactly is heavy for each of these weightful paths.
         """)
         code(f"""\
         plot_grid_bubble_histo('/tmp/{fname}.csv',
                                'bytes', 'ekind', 'path3')""")
         cell = {
             'block level 2,056,194': {
-                None: None,
+                None: """
+                💡 40% of the bytes taken by the tree are located within the 62 nodes of length >16k children.
+
+                💡 Most of the space occupied by contents is in the `/data/big_maps/index/*/contents/*/data` files.
+                """,
             },
         }.get(block_desc, {}).get(path_zoom)
         if cell is not None: markdown(cell)
