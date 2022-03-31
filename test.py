@@ -1,62 +1,35 @@
-
-# To name cycle dist: "distance from commit (cycles). <1, 1-2, 2-3, 3-4, 4+"
-# To name contents:
-# To name inodes:
-#  - "xsmall" (Inode_root_values)
-#  - "small" (root len 33-256)
-#  - "medium" (root len 256-2048)
-#  - "large" (root len 2049-16384)
-#  - "xlarge" (root len 16385+)
-#
 # * PRESENTATION ***************************************************************
 #
 # - Let's pretend the pack file stops at the last commit analysed
+#
+# - 0d
+#  - All extended kinds
+#
+# - 1d over area
 # - A horizontal histogram that shows the pack file and where the areas and the analysed commits are
-#   - It should also explain what is the average tree
+#   - It should also explain what is the average tree. Or do I drop the averaged tree stuff?
+#   - Let's show the extended kinds
 #
 # * AVERAGE TREE  **************************************************************
-#
-# - In an "average tree", 0d break down
-#   - For each indicator, its total value
-#
-# - In an "average tree", 1d break down
-#   - #nodes/#entries/#bytes (3 pies or 1 vertical bubble list with 3 cols)
-#   - For each indicator.
-#     - Kind9
-#     - Distance from commit5
-#     - Path4
-#     - Path8
-#       - The 6 large dirs are individually detailed in another section
-#     - Path120
-#   - It is a simplified version of the "grid" one that follows
-#
-# - In an "average tree", 2d break down
-#   - 9 grids with a circle in all cells with area equal to importance
-#     - #nodes/#entries/#bytes
-#     - 9kinds, 8paths, 5dists
-#       - left=kind,   top=dist
-#       - left=path,   top=dist
-#       - left=path,   top=kind
-#
 # * LARGE DIRECTORIES IN AVERAGE TREE  *****************************************
-#
-# - For each weighful directories, a detailed analysis of why they are large
-#   - We should see the breakdown as well as how it relates to the full dataset
-#   - Direct/Indirect/Header
 #
 # * OVER ALL TREES *************************************************************
 #
-# - Over all trees, how evolves #nodes/#entries/#bytes
+# - Over all trees, how evolves #contents/#nodes/#hidden-node/#objects/#bytes
 #  - A simplified version of the following one
 #
-# - Over all trees, how evolves  #nodes/#entries/#bytes
-#  - One plot for each discriminator,
-#  - In a plot are stacked the categories of an indicator
+# - 2 plots, for #objects and #bytes
+#   - Horizontal bubble histo
+#   - One row is one tree
+#   - One column is one kind
+#   - Over all trees, how evolves #contents/#nodes/#hidden-node/#objects/#bytes
 #
-# - Over all trees, how many pages are touched
-#
+# ? Chunks
 #
 # * TRAVERSAL  *****************************************************************
+#
+# - Over all trees, left to commit, %entries %bytes %pages touched
+#  - A simplified version of the following one
 #
 # - three 2d grids, y=pack file area, x=which tree
 #   - cells:
@@ -66,17 +39,8 @@
 #
 # * MISSING  *******************************************************************
 #
-# - step stuff
-# - hash header stuff
-# - 0d break down of the full file
-#
-#
-# Explanation on area_distance_from_origin
-#
-# --- towards beginning of pack files ----- toward end of pack file ----
-# plot a dummy tree with topo groups, relate that to pack file offsets
-#
-# Explanation on how to read 1d and 2d bubble histo
+# - What's in cycle 444 area, compared to cycle 445 tree
+# - Chunk and pages of tree 445
 #
 #
 

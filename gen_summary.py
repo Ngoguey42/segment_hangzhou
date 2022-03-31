@@ -11,9 +11,13 @@ This document presents statistics computed on a pack file which results from a T
 
 The goal of this document is to gather insights for future improvements of irmin-pack, notably for the layered store design.
 
-This work is splited on several documents. Look for 💡 for insights.
+This work is splited on several documents.
+
+The light bulbs 💡 accompanying the plots are insights on what can be seen.
 
 The raw data used for this document can be found at `csv/*csv` in the same repository.
+
+These `.ipynb` files are generated using the `gen_*.py` scripts in the same repository.
 
 ### Contents of the Pack File
 
@@ -21,7 +25,7 @@ This bootstrap was realised using Irmin 3.0 and its new structured keys, using t
 
 The first commit of the pack file belongs to block 1,916,930 (2nd of Hangzhou, 2nd of cycle 429, 4 Dec 2021).
 
-The last commit analysed belongs to block 2,056,194 (2nd of cycle 445, 23 Jan 2022). This particular commit is analysed in depth in the __The Tree of the Last Commit__ section.
+The last commit analysed belongs to block 2,056,194 (2nd of cycle 445, 23 Jan 2022). This particular commit is analysed in depth in the __Data Distribution in the Tree of the Last Commit__ section.
 
 
 ### What's the _Tree of a Commit_
@@ -43,7 +47,7 @@ Regardless of the indexing strategy, in Tezos, the tree of a commit shares more 
 
 Regardless of the indexing strategy, in Tezos, many contents and nodes appear several time in the tree. This is happening because Tezos tend to copy nodes and contents around, instead of re-creating them from scratch.
 
-### The Tree of the Last Commit
+### Data Distribution in the Tree of the Last Commit
 
 The stats in this section focus on the tree at the beginning of cycle 445. Many more objects were added during cycle 444 and all the previous cycles, but only a fraction is still referenced by the tree at the beginning of cycle 445.
 

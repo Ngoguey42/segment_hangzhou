@@ -38,7 +38,6 @@
    - Correlating with an actions trace, where are the RO patterns focused?
    TODO: Some multiples might be missing because of the star aliasing
    TODO: When I reason about size of directories I'm not counting the multiples
-   TODO: "/" is missing from paths...
 
   thoughts:
    - I learned that they want to freeze at each cycle. I don't think it
