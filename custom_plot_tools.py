@@ -408,7 +408,7 @@ def plot_area_curve_object_count(csv_path):
     # plt.legend(loc='best')
     ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.10),
               fancybox=True, shadow=True, ncol=2)
-    plt.suptitle('Evolution of Area Object Count')
+    plt.suptitle("Evolution of Area's Object Count")
     ax.grid(True, axis='y', color='lightgrey')
 
     ys = df.area.values[1:-1]
@@ -467,7 +467,7 @@ def plot_area_curve_byte_count(csv_path):
     # plt.legend(loc='best')
     ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.10),
               fancybox=True, shadow=True, ncol=2)
-    plt.suptitle('Evolution of Area Byte Count')
+    plt.suptitle("Evolution of Area's Byte Count")
     ax.grid(True, axis='y', color='lightgrey')
 
     ys = df.area.values[1:-1]

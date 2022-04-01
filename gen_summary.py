@@ -53,19 +53,25 @@ for i in range(df.area.min(), df.area.max() + 1):
         },
     ))
 df1 = pd.DataFrame(rows)
-df.to_csv('/tmp/summary_df1.csv', index=False)
+df.to_csv('/tmp/summary_df.csv', index=False)
+df1.to_csv('/tmp/summary_df1.csv', index=False)
 print(df1)
 
+markdown(f"""\
+# Hanghzou Irmin Pack File Analysis""")
 
+code(f"""\
+%matplotlib inline
+%load_ext autoreload
+%autoreload 2
+import custom_plot_tools""")
 
 markdown(f"""\
-# Hanghzou Irmin Pack File Analysis
-
 This document presents statistics computed on a pack file which results from a Tezos bootstrapping on the first 2 month of the Hanghzou protocol.
 
 The goal of this document is to gather insights for future improvements of irmin-pack, notably for the layered store design.
 
-This work is splited on several documents.
+This work is splitted on several pages📄.
 
 The light bulbs 💡 accompanying the data are insights on what can be seen.
 
@@ -102,6 +108,7 @@ Ignoring the genesis commit which is present in all Tezos pack files, the first 
 
 The last commit analysed belongs to block 2,056,194 (2nd of cycle 445, 23 Jan 2022, https://tzstats.com/2056194). This commit is analysed in depth in the __Data Distribution in the Tree of Commit 445__ section.
 
+
 ##### Summary
 ```
 Number of objects: {int(d0.loc['count']):,d} (a.k.a. pack file entries). Breakdown:
@@ -128,7 +135,6 @@ Second breakdown:
 This document focuses on 18 commits, which are the 2nd of the Tezos cycles 428 to 445. "Commit 428" is the first commit of the pack file (ignoring the genesis commit) and "commit 445" is the last commit analysed in this document.
 
 This document considers 19 areas delimited by the 18 commits:
-
 """)
 
 l = []
@@ -160,8 +166,24 @@ markdown(f"""\
 
 💡 Commit 429 is preceded by ~8200 commits, which makes it a typical _freeze commit_ for the layered store
 
-[📄areas.ipynb](./areas.ipynb) pushes further the analysis of the areas.
 
+##### Areas Evolution
+The areas get bigger over time. This is directly because the Tezos blockchain is growing. A cycle tend to host more transactions than the previous one.
+
+### Tree of Commits
+
+""")
+
+code(f"""custom_plot_tools.plot_area_curve_object_count('/tmp/summary_df1.csv')""")
+
+markdown(f"""\
+💡 Cycles 430, 434, 437, 442 and 444 are significantly below the average curve. They correspond to week-ends and holidays!
+""")
+
+code(f"""custom_plot_tools.plot_area_curve_byte_count('/tmp/summary_df1.csv')""")
+
+markdown(f"""\
+💡 Cycle 428 grew the pack file by ~2.9GB and cycle 443 by ~3.5GB. Most of this acceleration is due to the hidden nodes.
 """)
 
 markdown(f"""\
