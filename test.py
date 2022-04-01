@@ -1,15 +1,4 @@
 # * PRESENTATION ***************************************************************
-#
-# - Let's pretend the pack file stops at the last commit analysed
-#
-# - 0d
-#  - All extended kinds
-#
-# - 1d over area
-# - A horizontal histogram that shows the pack file and where the areas and the analysed commits are
-#   - It should also explain what is the average tree. Or do I drop the averaged tree stuff?
-#   - Let's show the extended kinds
-#
 # * AVERAGE TREE  **************************************************************
 # * LARGE DIRECTORIES IN AVERAGE TREE  *****************************************
 #
@@ -41,7 +30,7 @@
 #
 # - What's in cycle 444 area, compared to cycle 445 tree
 # - Chunk and pages of tree 445
-#
+# - A section on tree 427
 #
 
 

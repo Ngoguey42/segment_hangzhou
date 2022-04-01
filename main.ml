@@ -36,6 +36,7 @@
    - size of the unshared tree. i.e. if the DAG is made a tree.
    - which paths are new compared to the previous cycle
    - Correlating with an actions trace, where are the RO patterns focused?
+   - The steps in "areas.csv"
    TODO: Some multiples might be missing because of the star aliasing
    TODO: When I reason about size of directories I'm not counting the multiples
 

@@ -59,10 +59,15 @@ def on_averaged_tree(df, fname, block_desc, block_subdesc, path_zoom=None):
     - {float(d.loc['node_count'] / max(1, d.loc['count'])):4.0%} {int(d.loc['node_count']):>10,d} nodes (a.k.a. root inodes, directories);
     - {float(d.loc['inner_count'] / max(1, d.loc['count'])):4.0%} {int(d.loc['inner_count']):>10,d} hidden nodes (a.k.a. non-root inodes).
 
-    Number of bytes: {int(d.loc['bytes']):,d}. Breakdown:
+    Number of bytes: {int(d.loc['bytes']):,d}. First breakdown:
+    - {float(d.loc['blob_bytes'] / max(1, d.loc['bytes'])):4.0%} {int(d.loc['blob_bytes']):>13,d}B in contents;
+    - {float(d.loc['node_bytes'] / max(1, d.loc['bytes'])):4.0%} {int(d.loc['node_bytes']):>13,d}B in nodes;
+    - {float(d.loc['inner_bytes'] / max(1, d.loc['bytes'])):4.0%} {int(d.loc['inner_bytes']):>13,d}B in hidden nodes.
+
+    Second breakdown:
     - {float(d.loc['header_bytes'] / max(1, d.loc['bytes'])):4.0%} {int(d.loc['header_bytes']):>11,d}B used by the 32 byte hash that prefixes all objects;
     - {float(d.loc['direct_bytes'] / max(1, d.loc['bytes'])):4.0%} {int(d.loc['direct_bytes']):>11,d}B used in hard coded steps (a.k.a. direct step) (a step is a file name or a directory name, it is a step in a path);
-    - {float(d.loc['other_bytes'] / max(1, d.loc['bytes'])):4.0%} {int(d.loc['other_bytes']):>11,d}B elsewhere (i.e. length segment + value segment).
+    - {float(d.loc['other_bytes'] / max(1, d.loc['bytes'])):4.0%} {int(d.loc['other_bytes']):>11,d}B elsewhere.
 
     Number of steps: {int(d.loc['step_count']):,d} (i.e. number of node children). Breakdown:
     - {float(d.loc['direct_count'] / max(1, d.loc['step_count'])):4.0%} {int(d.loc['direct_count']):>10,d} by direct references (i.e. parent records hard coded step);
@@ -382,7 +387,7 @@ def on_averaged_tree(df, fname, block_desc, block_subdesc, path_zoom=None):
         nbf.write(nb, f)
 
 discriminators = 'area_distance_from_origin path path2 path3 kind node_length contents_size'.split(' ')
-indicators = 'count node_count inner_count blob_count step_count indirect_count direct_count bytes direct_bytes header_bytes other_bytes'.split(' ')
+indicators = 'count node_count inner_count blob_count step_count indirect_count direct_count bytes direct_bytes header_bytes other_bytes node_bytes inner_bytes blob_bytes'.split(' ')
 
 df = pd.read_csv('csv/entries.csv')
 
@@ -403,6 +408,10 @@ df['node_count'] = df.apply(lambda row: row['count'] if '_root_' in row.kind els
 df['inner_count'] = df.apply(lambda row: row['count'] if '_nonroot_' in row.kind else 0, axis=1)
 df['blob_count'] = df.apply(lambda row: row['count'] if 'Contents' == row.kind else 0, axis=1)
 df['step_count'] = df['direct_count'] + df['indirect_count']
+df['node_bytes'] = df.apply(lambda row: row['bytes'] if '_root_' in row.kind else 0, axis=1)
+df['inner_bytes'] = df.apply(lambda row: row['bytes'] if '_nonroot_' in row.kind else 0, axis=1)
+df['blob_bytes'] = df.apply(lambda row: row['bytes'] if 'Contents' == row.kind else 0, axis=1)
+
 # Drop the first ~5 cycle stats as they are very close to the snapshot
 df = df[df.parent_cycle_start >= 434]
 
