@@ -169,25 +169,88 @@ markdown(f"""\
 
 ##### Areas Evolution
 The areas get bigger over time. This is directly because the Tezos blockchain is growing. A cycle tend to host more transactions than the previous one.
-
-### Tree of Commits
-
 """)
 
-code(f"""custom_plot_tools.plot_area_curve_object_count('/tmp/summary_df1.csv')""")
+code(f"""custom_plot_tools.plot_area_curve_object_count('/tmp/summary_df1.csv', 'area', "Evolution of Areas' Object Count", xbounds=(428, 444))""")
 
 markdown(f"""\
 💡 Cycles 430, 434, 437, 442 and 444 are significantly below the average curve. They correspond to week-ends and holidays!
 """)
 
-code(f"""custom_plot_tools.plot_area_curve_byte_count('/tmp/summary_df1.csv')""")
+code(f"""custom_plot_tools.plot_area_curve_byte_count('/tmp/summary_df1.csv', 'area', "Evolution of Areas' Disk Footprint", xbounds=(428, 444))""")
 
 markdown(f"""\
+💡 Each area weigh around 3GB, which corresponds the growth of the pack file at every cycle (every 3 days).
+
 💡 Cycle 428 grew the pack file by ~2.9GB and cycle 443 by ~3.5GB. Most of this acceleration is due to the hidden nodes.
 """)
 
+del df, dtmp, df1, rows
+
+# ******************************************************************************
+# ******************************************************************************
+# ******************************************************************************
+
+discriminators = 'area_distance_from_origin path path2 path3 kind node_length contents_size'.split(' ')
+indicators = 'count node_count inner_count blob_count step_count indirect_count direct_count bytes direct_bytes header_bytes other_bytes node_bytes inner_bytes blob_bytes'.split(' ')
+
+df = pd.read_csv('csv/entries.csv')
+
+# Fix the broken paths
+df['path'] = df.path.fillna('/')
+
+# Add the derived discriminators
+df['ekind'] = df.apply(lambda row: row.contents_size if row.contents_size != "Na" else row.node_length, axis=1)
+
+# Add the derived indicators
+df['header_bytes'] = df['count'] * 32
+df['other_bytes'] = df.bytes - df.header_bytes - df.direct_bytes
+df['node_count'] = df.apply(lambda row: row['count'] if '_root_' in row.kind else 0, axis=1)
+df['inner_count'] = df.apply(lambda row: row['count'] if '_nonroot_' in row.kind else 0, axis=1)
+df['blob_count'] = df.apply(lambda row: row['count'] if 'Contents' == row.kind else 0, axis=1)
+df['step_count'] = df['direct_count'] + df['indirect_count']
+df['node_bytes'] = df.apply(lambda row: row['bytes'] if '_root_' in row.kind else 0, axis=1)
+df['inner_bytes'] = df.apply(lambda row: row['bytes'] if '_nonroot_' in row.kind else 0, axis=1)
+df['blob_bytes'] = df.apply(lambda row: row['bytes'] if 'Contents' == row.kind else 0, axis=1)
+
+# Switch indicators to float
+for c in indicators:
+    df[c] = df[c].astype(float)
+
+# Switch from 'entry_area' to 'area_distance_from_origin'
+df['area_distance_from_origin'] = (df.parent_cycle_start - df.entry_area).clip(0, 5)
+df = df.drop(columns=['entry_area'])
+
+df1 = df.groupby('parent_cycle_start')[indicators].sum().reset_index()
+df1.to_csv(f'/tmp/all_trees_df1.csv', index=False)
+
+# ******************************************************************************
 markdown(f"""\
-### Data Distribution in the Tree of Commit 445
+### Tree of Commits
+""")
+
+code(f"""custom_plot_tools.plot_area_curve_object_count('/tmp/all_trees_df1.csv', 'parent_cycle_start', "Evolution of Commit Trees' Object Count")""")
+
+markdown(f"""\
+💡 While the rate at which the pack file areas grow is unstable, the rate at which the commit trees grow is extremely stable.
+
+💡 The commit tree gains 141k blobs per cycle, while half a million are in each area (see previous section). This highlights the fact that very few blobs pushed to the pack file stay around.
+""")
+
+code(f"""custom_plot_tools.plot_area_curve_byte_count('/tmp/all_trees_df1.csv', 'parent_cycle_start', "Evolution of Commit Trees' Disk Footprint")""")
+markdown(f"""\
+💡 The commit tree grows 39MB per cycle while the pack file grows 3GB per cycle. This average growth doesn't reflect the fact that a cycle replaces objects from previous cycles. The data in `The Tree of Commit 445` shows that commit 445 references 267MB of data from cycle 444 and 154MB from cycle 443.
+
+💡 The commit tree growing of 39MB per cycle doesn't imply that only 3
+""")
+
+
+# ******************************************************************************
+# ******************************************************************************
+# ******************************************************************************
+
+markdown(f"""\
+### The Tree of Commit 445
 
 The stats in this section focus on the tree at the beginning of cycle 445. Many more objects were added during cycle 444 and all the previous cycles, but only a fraction is still referenced by the tree at the beginning of cycle 445.
 

@@ -1,19 +1,7 @@
 # * PRESENTATION ***************************************************************
 # * AVERAGE TREE  **************************************************************
 # * LARGE DIRECTORIES IN AVERAGE TREE  *****************************************
-#
 # * OVER ALL TREES *************************************************************
-#
-# - Over all trees, how evolves #contents/#nodes/#hidden-node/#objects/#bytes
-#  - A simplified version of the following one
-#
-# - 2 plots, for #objects and #bytes
-#   - Horizontal bubble histo
-#   - One row is one tree
-#   - One column is one kind
-#   - Over all trees, how evolves #contents/#nodes/#hidden-node/#objects/#bytes
-#
-# ? Chunks
 #
 # * TRAVERSAL  *****************************************************************
 #
@@ -28,6 +16,7 @@
 #
 # * MISSING  *******************************************************************
 #
+# ? Chunks
 # - What's in cycle 444 area, compared to cycle 445 tree
 # - Chunk and pages of tree 445
 # - A section on tree 427

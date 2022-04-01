@@ -178,6 +178,8 @@ def on_averaged_tree(df, fname, block_desc, block_subdesc, path_zoom=None):
             None: f"""\
             💡 5% of the objects of the tree were created during cycle 444. Reminder: we are looking at cycle 445.
 
+            💡 267MB out of the ~3.5GB of area 444 are reachable from commit 445. This gets down to 154MB for area 443. This highlights the fact that successive commits tend to shadow recent data.
+
             💡 While cycle 444 pushed 3149MB to the pack file (not visible here), only 267MB (sum of the 1st row) are still useful for cycle 445 (8%).
 
             💡 While cycle 441 pushed 3474MB to the pack file (not visible here), only 95MB (sum of the 4th row) are still useful for cycle 445 (3%).

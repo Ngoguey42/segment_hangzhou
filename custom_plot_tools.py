@@ -374,7 +374,7 @@ def plot_vertical_bubble_histo(csv_path, discriminator):
     plt.tight_layout()
     plt.show()
 
-def plot_area_curve_object_count(csv_path):
+def plot_area_curve_object_count(csv_path, xcolumn, subtitle, xbounds=None):
     df = pd.read_csv(csv_path)
 
     figsize = np.asarray([10, 6])
@@ -391,28 +391,34 @@ def plot_area_curve_object_count(csv_path):
         count=("black", "total"),
     )
 
+    if xbounds is not None:
+        minx, maxx = xbounds
+        mask = (df[xcolumn] >= minx) & (df[xcolumn] <= maxx)
+        xs = df[xcolumn].values[mask]
+    else:
+        xs = df[xcolumn].values
     for col in "count inner_count node_count blob_count".split(' '):
-        ys = df[col].values
-        xs = df.area.values
+        if xbounds is not None:
+            ys = df[col].values[mask]
+        else:
+            ys = df[col].values
         color, title = layout[col]
 
-        plt.plot(xs[1:-1], ys[1:-1], 'x', c=color)
+        plt.plot(xs, ys, 'x', c=color)
 
         def fit_func(x, a, b):
             return a*x + b
-        [slope, intercept], _ = spo.curve_fit(fit_func, xs[1:-1], ys[1:-1])
-        plt.plot(xs[1:-1], fit_func(xs[1:-1], slope, intercept), c=color, alpha=0.33,
+        [slope, intercept], _ = spo.curve_fit(fit_func, xs, ys)
+        plt.plot(xs, fit_func(xs, slope, intercept), c=color, alpha=0.33,
                  label=title + ' (slope {:+.0f}K per cycle)'.format(slope / 1e3))
 
-
-    # plt.legend(loc='best')
     ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.10),
               fancybox=True, shadow=True, ncol=2)
-    plt.suptitle("Evolution of Area's Object Count")
+    plt.suptitle(subtitle)
     ax.grid(True, axis='y', color='lightgrey')
 
-    ys = df.area.values[1:-1]
-    ax.set_xlim(ys.min(), ys.max())
+    ax.set_xlim(xs.min(), xs.max())
+    ax.set_xticks(xs)
     ax.set_xlabel('area')
 
     ax.set_ylim(0, df['count'].max() * 1.0)
@@ -426,7 +432,7 @@ def plot_area_curve_object_count(csv_path):
 
     plt.show()
 
-def plot_area_curve_byte_count(csv_path):
+def plot_area_curve_byte_count(csv_path, xcolumn, subtitle, xbounds=None):
     df = pd.read_csv(csv_path)
 
     figsize = np.asarray([10, 6])
@@ -447,31 +453,37 @@ def plot_area_curve_byte_count(csv_path):
         bytes=("black", "total"),
     )
 
+    if xbounds is not None:
+        minx, maxx = xbounds
+        mask = (df[xcolumn] >= minx) & (df[xcolumn] <= maxx)
+        xs = df[xcolumn].values[mask]
+    else:
+        xs = df[xcolumn].values
     for col in "bytes inner_bytes node_bytes blob_bytes".split(' '):
-        ys = df[col].values
-        xs = df.area.values
+        if xbounds is not None:
+            ys = df[col].values[mask]
+        else:
+            ys = df[col].values
         color, title = layout[col]
 
-        plt.plot(xs[1:-1], ys[1:-1], 'x', c=color)
+        plt.plot(xs, ys, 'x', c=color)
 
         def fit_func(x, a, b):
             return a*x + b
-        [slope, intercept], _ = spo.curve_fit(fit_func, xs[1:-1], ys[1:-1])
+        [slope, intercept], _ = spo.curve_fit(fit_func, xs, ys)
         if slope / 1e6 < 5:
             label = title + ' (slope {:+.1f}MB per cycle)'.format(slope / 1e6)
         else:
             label = title + ' (slope {:+.0f}MB per cycle)'.format(slope / 1e6)
-        plt.plot(xs[1:-1], fit_func(xs[1:-1], slope, intercept), c=color, alpha=0.33, label=label)
+        plt.plot(xs, fit_func(xs, slope, intercept), c=color, alpha=0.33, label=label)
 
-
-    # plt.legend(loc='best')
     ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.10),
               fancybox=True, shadow=True, ncol=2)
-    plt.suptitle("Evolution of Area's Byte Count")
+    plt.suptitle(subtitle)
     ax.grid(True, axis='y', color='lightgrey')
 
-    ys = df.area.values[1:-1]
-    ax.set_xlim(ys.min() - ys.ptp() * 0.0, ys.max() + ys.ptp() * 0.0)
+    ax.set_xlim(xs.min(), xs.max())
+    ax.set_xticks(xs)
     ax.set_xlabel('area')
 
     ax.set_ylim(0, df['bytes'].max() * 1.0)
