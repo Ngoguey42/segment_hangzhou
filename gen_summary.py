@@ -19,9 +19,6 @@ indicators = 'count node_count inner_count blob_count commit_count bytes node_by
 # Artificially patching [df] to add the last commit. It simplifies explanation
 df = df.append(dict(area=445, kind="Commit", contents_size="Na", count=1, bytes=110), ignore_index=True)
 
-
-
-
 df['ekind'] =  df.apply(lambda row: row.contents_size if row.contents_size != "Na" else row.kind, axis=1)
 df['node_count'] = df.apply(lambda row: row['count'] if '_root_' in row.kind else 0, axis=1)
 df['inner_count'] = df.apply(lambda row: row['count'] if '_nonroot_' in row.kind else 0, axis=1)
@@ -126,11 +123,12 @@ Second breakdown:
 
 💡 `139,431` commits are accounted above, but when looking at the block levels we would expect `139,265` (`2,056,194 - 1,916,930 + 1`). This difference is due to orphan blocks.
 
-##### Summary per pack file Area
+### Pack File Areas
 
 This document focuses on 18 commits, which are the 2nd of the Tezos cycles 428 to 445. "Commit 428" is the first commit of the pack file (ignoring the genesis commit) and "commit 445" is the last commit analysed in this document.
 
 This document considers 19 areas delimited by the 18 commits:
+
 """)
 
 l = []
@@ -162,7 +160,7 @@ markdown(f"""\
 
 💡 Commit 429 is preceded by ~8200 commits, which makes it a typical _freeze commit_ for the layered store
 
-[📄areas.ipynb](./areas.ipynb) details the contents of these areas.
+[📄areas.ipynb](./areas.ipynb) pushes further the analysis of the areas.
 
 """)
 

@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 import itertools
+import scipy.optimize as spo
 
 indicators = 'count node_count inner_count blob_count step_count indirect_count direct_count bytes direct_bytes header_bytes other_bytes'.split(' ')
 
@@ -371,4 +372,115 @@ def plot_vertical_bubble_histo(csv_path, discriminator):
     ax.set_yticklabels(ylabs, fontsize=fontsize_out, **xaxis_fontstuff)
 
     plt.tight_layout()
+    plt.show()
+
+def plot_area_curve_object_count(csv_path):
+    df = pd.read_csv(csv_path)
+
+    figsize = np.asarray([10, 6])
+    plt.close('all')
+    fig, ax = plt.subplots(
+        dpi=100,
+        figsize=figsize,
+    )
+
+    layout = dict(
+        blob_count=("blue", "blob"),
+        node_count=("orange", "node"),
+        inner_count=("red", "hidden node"),
+        count=("black", "total"),
+    )
+
+    for col in "count inner_count node_count blob_count".split(' '):
+        ys = df[col].values
+        xs = df.area.values
+        color, title = layout[col]
+
+        plt.plot(xs[1:-1], ys[1:-1], 'x', c=color)
+
+        def fit_func(x, a, b):
+            return a*x + b
+        [slope, intercept], _ = spo.curve_fit(fit_func, xs[1:-1], ys[1:-1])
+        plt.plot(xs[1:-1], fit_func(xs[1:-1], slope, intercept), c=color, alpha=0.33,
+                 label=title + ' (slope {:+.0f}K per cycle)'.format(slope / 1e3))
+
+
+    # plt.legend(loc='best')
+    ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.10),
+              fancybox=True, shadow=True, ncol=2)
+    plt.suptitle('Evolution of Area Object Count')
+    ax.grid(True, axis='y', color='lightgrey')
+
+    ys = df.area.values[1:-1]
+    ax.set_xlim(ys.min(), ys.max())
+    ax.set_xlabel('area')
+
+    ax.set_ylim(0, df['count'].max() * 1.0)
+    xs = np.arange(0, df['count'].max() + 1e6, 1e6)
+    ax.set_yticks(xs)
+    ax.set_yticklabels([
+        f'{x / 1e6:.0f}M'
+        for x in xs
+    ])
+    ax.set_ylabel('object count')
+
+    plt.show()
+
+def plot_area_curve_byte_count(csv_path):
+    df = pd.read_csv(csv_path)
+
+    figsize = np.asarray([10, 6])
+    plt.close('all')
+    fig, ax = plt.subplots(
+        dpi=100,
+        figsize=figsize,
+    )
+
+    layout = dict(
+        blob_count=("blue", "blob"),
+        node_count=("orange", "node"),
+        inner_count=("red", "hidden node"),
+        count=("black", "total"),
+        blob_bytes=("blue", "blob"),
+        node_bytes=("orange", "node"),
+        inner_bytes=("red", "hidden node"),
+        bytes=("black", "total"),
+    )
+
+    for col in "bytes inner_bytes node_bytes blob_bytes".split(' '):
+        ys = df[col].values
+        xs = df.area.values
+        color, title = layout[col]
+
+        plt.plot(xs[1:-1], ys[1:-1], 'x', c=color)
+
+        def fit_func(x, a, b):
+            return a*x + b
+        [slope, intercept], _ = spo.curve_fit(fit_func, xs[1:-1], ys[1:-1])
+        if slope / 1e6 < 5:
+            label = title + ' (slope {:+.1f}MB per cycle)'.format(slope / 1e6)
+        else:
+            label = title + ' (slope {:+.0f}MB per cycle)'.format(slope / 1e6)
+        plt.plot(xs[1:-1], fit_func(xs[1:-1], slope, intercept), c=color, alpha=0.33, label=label)
+
+
+    # plt.legend(loc='best')
+    ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.10),
+              fancybox=True, shadow=True, ncol=2)
+    plt.suptitle('Evolution of Area Byte Count')
+    ax.grid(True, axis='y', color='lightgrey')
+
+    ys = df.area.values[1:-1]
+    ax.set_xlim(ys.min() - ys.ptp() * 0.0, ys.max() + ys.ptp() * 0.0)
+    ax.set_xlabel('area')
+
+    ax.set_ylim(0, df['bytes'].max() * 1.0)
+    xs = np.arange(0, df['bytes'].max() + 2.5e8, 2.5e8)
+    ax.set_yticks(xs)
+    ax.set_yticklabels([
+        f'{x / 1e6:.0f}M'
+        for x in xs
+    ])
+    ax.set_ylabel('bytes')
+
     plt.show()
