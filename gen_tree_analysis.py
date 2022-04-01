@@ -46,7 +46,7 @@ def on_averaged_tree(df, fname, block_desc, block_subdesc, path_zoom=None):
     %matplotlib inline
     %load_ext autoreload
     %autoreload 2
-    from custom_plot_tools import plot_4_vertical_bubble_histo, plot_grid_bubble_histo""")
+    from custom_plot_tools import plot_vertical_bubble_histo, plot_grid_bubble_histo""")
 
     # **************************************************************************
     # **************************************************************************
@@ -126,8 +126,7 @@ def on_averaged_tree(df, fname, block_desc, block_subdesc, path_zoom=None):
     __Each column in such a graph sum to 100%__.
     """)
     code(f"""\
-    plot_4_vertical_bubble_histo('/tmp/{fname}.csv',
-                                 'ekind')""")
+    plot_vertical_bubble_histo('/tmp/{fname}.csv', 'ekind')""")
     cell = {
         'block level 2,056,194': {
             None: f"""\
@@ -173,8 +172,7 @@ def on_averaged_tree(df, fname, block_desc, block_subdesc, path_zoom=None):
 
     """)
     code(f"""\
-    plot_4_vertical_bubble_histo('/tmp/{fname}.csv',
-                                 'area_distance_from_origin')""")
+    plot_vertical_bubble_histo('/tmp/{fname}.csv', 'area_distance_from_origin')""")
     cell = {
         'block level 2,056,194': {
             None: f"""\
@@ -220,8 +218,7 @@ def on_averaged_tree(df, fname, block_desc, block_subdesc, path_zoom=None):
         The following plot groups the objects into 4 categories, depending on their ancestor directory.
         """)
         code(f"""\
-        plot_4_vertical_bubble_histo('/tmp/{fname}.csv',
-                                     'path2')""")
+        plot_vertical_bubble_histo('/tmp/{fname}.csv', 'path2')""")
 
         cell = {
             'block level 2,056,194': {
@@ -240,8 +237,7 @@ def on_averaged_tree(df, fname, block_desc, block_subdesc, path_zoom=None):
         These paths are also individually analysed in separate files that you may find by going back to the index.
         """)
         code(f"""\
-        plot_4_vertical_bubble_histo('/tmp/{fname}.csv',
-                                     'path3')""")
+        plot_vertical_bubble_histo('/tmp/{fname}.csv', 'path3')""")
 
         cell = {
             'block level 2,056,194': {
@@ -264,8 +260,7 @@ def on_averaged_tree(df, fname, block_desc, block_subdesc, path_zoom=None):
         The following plot groups the objects given their precise location.
         """)
         code(f"""\
-        plot_4_vertical_bubble_histo('/tmp/{fname}.csv',
-                                     'path')""")
+        plot_vertical_bubble_histo('/tmp/{fname}.csv', 'path')""")
         cell = {
             'block level 2,056,194': {
                 None: None,

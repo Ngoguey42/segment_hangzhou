@@ -142,25 +142,27 @@ for i, row in df1.iterrows():
         for x in x
     ]
     x = ' | '.join(x)
-    x = f'| {i} | {x} |'
+    x = f'| {i} | {x} | `[{row.start_offset:,d}; {row.end_offset:,d}[` |'
     l.append(x)
 newline = '\n'
 markdown(f"""\
-|idx|area|first commit level|blob count|node count|hidden node count|commit count|object count|bytes|
-|-|-|-|-|-|-|-|-|-|
+|idx|area|first commit level|blob count|node count|hidden node count|commit count|object count|bytes|offset interval|
+|-|-|-|-|-|-|-|-|-|-|
 {newline.join(l)}
 
 💡 The first area starts at the beginning of the pack file and ends right before commit 428.
 
 💡 The second area's first object is commit 428. It ends right before commit 429.
 
-💡 The first area contains the genesis commit. The last area only contains commit 445. All other areas have at least 8198 commits, which is the number of block level in a cycle, the other commits being orphan ones.
+💡 The first area contains the genesis commit. The last area only contains commit 445. All other areas have at least 8192 commits, which is the number of block level in a cycle, the other commits being orphan ones.
 
 💡 The first area is solely made of objects from the snapshot import.
 
 💡 Aside for 4 objects that belong to the genesis commit, the objects of the first area are the objects of the tree of commit 428.
 
 💡 Commit 429 is preceded by ~8200 commits, which makes it a typical _freeze commit_ for the layered store
+
+[📄areas.ipynb](./areas.ipynb) details the contents of these areas.
 
 """)
 
@@ -169,15 +171,15 @@ markdown(f"""\
 
 The stats in this section focus on the tree at the beginning of cycle 445. Many more objects were added during cycle 444 and all the previous cycles, but only a fraction is still referenced by the tree at the beginning of cycle 445.
 
-[tree_of_cycle_445.ipynb](./tree_of_cycle_445.ipynb) details the contents of the tree.
+[📄tree_of_cycle_445.ipynb](./tree_of_cycle_445.ipynb) details the contents of the tree.
 
 These notebooks zoom on the heaviest paths of the tree:
-- `/data/contracts/index`, the largest node in the tree [(url)](./tree_of_cycle_445_contracts-index.ipynb);
-- `/data/contracts/index/*`, the children of the largest node [(url)](./tree_of_cycle_445_contracts-index-star.ipynb);
-- `/data/contracts/index/*/manager`, a contents present in almost all contracts [(url)](./tree_of_cycle_445_contracts-index-star-manager.ipynb);
-- `/data/big_maps/index/*/contents` is where 43% of the bytes of the tree are located [(url)](./tree_of_cycle_445_big_maps-index-star-contents.ipynb);
-- `/data/big_maps/index/*/contents/*` are 5 million small nodes [(url)](./tree_of_cycle_445_big_maps-index-star-contents-star.ipynb);
-- `/data/big_maps/index/*/contents/*/data` are contents that take up a lot of space [(url)](./tree_of_cycle_445_big_maps-index-star-contents-star-data.ipynb).
+- `/data/contracts/index`, the largest node in the tree [📄url](./tree_of_cycle_445_contracts-index.ipynb);
+- `/data/contracts/index/*`, the children of the largest node [📄url](./tree_of_cycle_445_contracts-index-star.ipynb);
+- `/data/contracts/index/*/manager`, a contents present in almost all contracts [📄url](./tree_of_cycle_445_contracts-index-star-manager.ipynb);
+- `/data/big_maps/index/*/contents` is where 43% of the bytes of the tree are located [📄url](./tree_of_cycle_445_big_maps-index-star-contents.ipynb);
+- `/data/big_maps/index/*/contents/*` are 5 million small nodes [📄url](./tree_of_cycle_445_big_maps-index-star-contents-star.ipynb);
+- `/data/big_maps/index/*/contents/*/data` are contents that take up a lot of space [📄url](./tree_of_cycle_445_big_maps-index-star-contents-star-data.ipynb).
 
 """)
 

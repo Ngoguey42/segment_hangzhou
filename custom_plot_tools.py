@@ -214,7 +214,7 @@ csv_path = '/tmp/tree_of_cycle_445_contracts-index-star-manager.ipynb.csv'
 csv_path = '/tmp/tree_of_cycle_445.ipynb.csv'
 discriminator = 'ekind'
 # if True:
-def plot_4_vertical_bubble_histo(csv_path, discriminator):
+def plot_vertical_bubble_histo(csv_path, discriminator):
     df = pd.read_csv(csv_path)
     df = df.groupby(discriminator)[indicators].sum()
 
