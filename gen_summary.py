@@ -244,7 +244,6 @@ markdown(f"""\
 💡 The commit tree growing of 39MB per cycle doesn't imply that only 3
 """)
 
-
 # ******************************************************************************
 # ******************************************************************************
 # ******************************************************************************
@@ -253,6 +252,10 @@ markdown(f"""\
 ### Areas and Trees Cross-Analysis
 
 [📄areas_and_trees.ipynb](./areas_and_trees.ipynb) details where the data of each tree is located in the pack file.
+""")
+
+
+markdown(f"""\
 
 ### The Tree of Commit 445
 

@@ -101,7 +101,7 @@ code(f"""\
 %matplotlib inline
 %load_ext autoreload
 %autoreload 2
-import custom_plot_tools<""")
+import custom_plot_tools""")
 
 # ********************************************************************
 markdown(f"""\
@@ -150,6 +150,56 @@ custom_plot_tools.plot_areas_and_trees('/tmp/areas.csv', '/tmp/trees_in_areas.cs
 markdown(f"""\
 💡 Commit 429 spans on 99% of the pages of area 427 and 35% of the pages of area 429.
 """)
+
+# ********************************************************************
+
+# d = df2.pivot('parent_cycle_start', 'area', 'chunk_count')
+bytes = df2.pivot('parent_cycle_start', 'area', 'bytes')
+chunks = df2.pivot('parent_cycle_start', 'area', 'chunk_count')
+bytes.index.name = 'commit'
+chunks.index.name = 'commit'
+
+chunks_1d = chunks.sum(axis=1).astype(int).apply(lambda x: x if x < 1000 else f'{x / 1e6:.1f}M')
+bpc_2d = (bytes / chunks).applymap(lambda x: "" if not np.isfinite(x) else f'{x:.0f}' if x < 1e6 else f'{x / 1000000:.0f}M')
+chunks_2d = chunks.fillna(0).astype(int).applymap(lambda x: x if x < 1000 else f'{x / 1000:.0f}k')
+
+markdown(f"""\
+### Chunks of Consecutive Bytes of Commit Trees
+
+The tree of commit 428 is fully contained in area 427, which (almost) contains nothing else. This makes the file to file copy of commit 428 lightning fast.
+
+However, all the other commit trees suffer fragmentation.
+
+The following table shows the number of chunks for each commit.
+
+```
+{chunks_1d}
+```
+
+💡 This list can be seen as the number of offset intervals that a "sparse pack file" would be made of. It grows freeze after freeze, as the fragmentation of offset increases.
+
+💡 Commit 428 might be split in two because of the genesis commit.
+
+<br/>
+
+The following table indicates the number of chunks that each commit tree span on in each area. This corresponds to the number of small copies that must be performed to fully copy a tree form file to file.
+
+```
+{chunks_2d}
+```
+
+💡 The column for area 427 grows downward, indicating the increase in fragmentation as commits get older. The other columns shrink downward, which is a bit strange.
+
+<br/>
+
+That last table shows the average length in bytes of each of these chunks.
+
+```
+{bpc_2d}
+```
+
+""")
+
 
 
 nb['cells'] = cells
