@@ -106,7 +106,7 @@ This bootstrap was realised using Irmin 3.0 and its new structured keys, using t
 
 Ignoring the genesis commit which is present in all Tezos pack files, the first commit of the pack file belongs to block 1,916,930 (2nd of Hangzhou, 2nd of cycle 428, 4 Dec 2021, https://tzstats.com/1916930). This commit was created by a Tezos snapshot import.
 
-The last commit analysed belongs to block 2,056,194 (2nd of cycle 445, 23 Jan 2022, https://tzstats.com/2056194). This commit is analysed in depth in the __Data Distribution in the Tree of Commit 445__ section.
+The last commit analysed belongs to block 2,056,194 (2nd of cycle 445, 23 Jan 2022, https://tzstats.com/2056194). This commit is analysed in depth in the __The Tree of Commit 445__ section.
 
 
 ##### Summary
@@ -162,7 +162,7 @@ markdown(f"""\
 
 💡 The first area is solely made of objects from the snapshot import.
 
-💡 Aside for 4 objects that belong to the genesis commit, the objects of the first area are the objects of the tree of commit 428.
+💡 Aside for 7 objects that belong to the genesis commit, the objects of the first area are the objects of the tree of commit 428.
 
 💡 Commit 429 is preceded by ~8200 commits, which makes it a typical _freeze commit_ for the layered store
 
@@ -239,7 +239,7 @@ markdown(f"""\
 
 code(f"""custom_plot_tools.plot_area_curve_byte_count('/tmp/all_trees_df1.csv', 'parent_cycle_start', "Evolution of Commit Trees' Disk Footprint")""")
 markdown(f"""\
-💡 The commit tree grows 39MB per cycle while the pack file grows 3GB per cycle. This average growth doesn't reflect the fact that a cycle replaces objects from previous cycles. The data in `The Tree of Commit 445` shows that commit 445 references 267MB of data from cycle 444 and 154MB from cycle 443.
+💡 The commit tree grows 39MB per cycle while the pack file grows 3GB per cycle. This average growth doesn't reflect the fact that a cycle replaces objects from previous cycles. The data in __The Tree of Commit 445__ shows that commit 445 references 267MB of data from cycle 444 and 154MB from cycle 443.
 
 💡 The commit tree growing of 39MB per cycle doesn't imply that only 3
 """)
@@ -250,6 +250,10 @@ markdown(f"""\
 # ******************************************************************************
 
 markdown(f"""\
+### Areas and Trees Cross-Analysis
+
+[📄areas_and_trees.ipynb](./areas_and_trees.ipynb) details where the data of each tree is located in the pack file.
+
 ### The Tree of Commit 445
 
 The stats in this section focus on the tree at the beginning of cycle 445. Many more objects were added during cycle 444 and all the previous cycles, but only a fraction is still referenced by the tree at the beginning of cycle 445.

@@ -20,6 +20,52 @@ def fmt_count(samples):
         return f'{int(x):,d} '
     return fmt
 
+def fmt_count_short(x):
+    data = [
+        0,
+        f"{x:.0f} ",
+        10_000,
+        f"{x / 1e3:.0f} K",
+        1_000_000,
+        f"{x / 1e6:.1f} M",
+        10_000_000,
+        f"{x / 1e6:.0f} M",
+        1_000_000_000,
+        f"{x / 1e9:.1f} G",
+        10_000_000_000,
+        f"{x / 1e9:.0f} G",
+    ]
+    while True:
+        low_bound = data.pop(0)
+        s = data.pop(0)
+        if len(data) == 0:
+            return s
+        if x < data[0]:
+            return s
+
+def fmt_byte_short(x):
+    data = [
+        0,
+        f"{x:.0f} B",
+        10_000,
+        f"{x / 1e3:.0f} KB",
+        1_000_000,
+        f"{x / 1e6:.1f} MB",
+        10_000_000,
+        f"{x / 1e6:.0f} MB",
+        1_000_000_000,
+        f"{x / 1e9:.1f} GB",
+        10_000_000_000,
+        f"{x / 1e9:.0f} GB",
+    ]
+    while True:
+        low_bound = data.pop(0)
+        s = data.pop(0)
+        if len(data) == 0:
+            return s
+        if x < data[0]:
+            return s
+
 def fmt_megabyte(_samples):
     def fmt(x):
         x = x / 1e6
@@ -495,4 +541,117 @@ def plot_area_curve_byte_count(csv_path, xcolumn, subtitle, xbounds=None):
     ])
     ax.set_ylabel('bytes')
 
+    plt.show()
+
+def plot_areas_and_trees(path1, path2, indicator):
+    df1 = pd.read_csv(path1).set_index('area')[indicator]
+    df2 = pd.read_csv(path2).set_index(['parent_cycle_start', 'area'])[indicator]
+
+    min_circle_area = 0.8 / 100
+    max_circle_area = np.pi * 0.5 ** 2
+    yborder = 0.2
+    xborder = 0.4
+    xshift = 1.3
+    yshift = 1.
+    fontsize_out=8.5
+    fontsize_small=6.5
+    fontsize=6.5
+    fontstuff = dict(
+        fontweight='semibold',
+    )
+    max_val = df1.max()
+
+    if 'byte' in indicator:
+        fmt = fmt_byte_short
+    else:
+        fmt = fmt_count_short
+
+    figsize = np.asarray([10, 7.5])
+    plt.close('all')
+    fig, ax = plt.subplots(
+        dpi=100,
+        subplot_kw=dict(aspect="equal"),
+        figsize=figsize,
+    )
+
+    areas = list(df1.index)
+    commits = sorted(set(df2.reset_index()['parent_cycle_start']))
+    xlabs = [f'area {area}' for area in areas]
+    ylabs = ['area'] + [f'commit {commit}' for commit in commits]
+
+    xs = xborder + 0.5 + np.arange(len(xlabs)) * xshift
+    ys = (yborder + 0.5 + np.arange(len(ylabs)) * yshift)[::-1]
+
+    for x, (area, val) in zip(xs, df1.items()):
+        area = val / max_val * max_circle_area
+        if area > 0:
+            area = max(min_circle_area, area)
+        rad = (area / np.pi) ** 0.5
+        y = ys[0]
+        ax.add_patch(plt.Circle(xy=[x, y], radius=rad, zorder=10))
+        ax.text(
+            x, y + rad + 0.01, fmt(val),
+            horizontalalignment='center', verticalalignment='bottom',
+            fontsize=fontsize,
+            fontweight='semibold',
+            zorder=15,
+        )
+
+    for y, commit in zip(ys[1:], commits):
+        df = df2.loc[commit]
+        for x, area in zip(xs, areas):
+            if area not in df.index: continue
+            val = df.loc[area]
+            circle_area = val / max_val * max_circle_area
+            if circle_area > 0:
+                circle_area = max(min_circle_area, circle_area)
+            rad = (circle_area / np.pi) ** 0.5
+            ax.add_patch(plt.Circle(xy=[x, y], radius=rad, zorder=10))
+
+            pct = val / df1.loc[area]
+            if pct > 0.04:
+                text = f'{pct:.0%}'
+            elif pct > 0.003:
+                text = f'{pct:.1%}'
+            elif pct > 0.0003:
+                text = f'{pct:.2%}'
+            else:
+                text = f'{pct:.3%}'
+            if circle_area > 0.35:
+                ax.text(
+                    x, y + 0.012, text,
+                    horizontalalignment='center', verticalalignment='center',
+                    fontsize=fontsize_small,
+                    zorder=15,
+                    color='white',
+                    fontweight='semibold',
+                )
+            else:
+                ax.text(
+                    x, y - rad - 0.037, text,
+                    horizontalalignment='center', verticalalignment='top',
+                    fontsize=fontsize_small,
+                    zorder=15,
+                )
+
+
+    for axis in ['left', 'top','bottom','right']:
+        ax.spines[axis].set_visible(False)
+
+    plt.tick_params(
+        top=False, bottom=False, left=False, right=False,
+        labelbottom=False,labeltop=True,
+        labelleft=False,labelright=True,
+    )
+    # plt.suptitle(indicator)
+
+    ax.set_xlim(min(xs) - 0.5 - xborder, max(xs) + 0.5 + xborder)
+    ax.set_xticks(xs)
+    ax.set_xticklabels(xlabs, rotation=45, ha='left', fontsize=fontsize_out)
+
+    ax.set_ylim(min(ys) - 0.5 - yborder, max(ys) + 0.5 + yborder)
+    ax.set_yticks(ys)
+    ax.set_yticklabels(ylabs, fontsize=fontsize_out)
+
+    plt.tight_layout()
     plt.show()
