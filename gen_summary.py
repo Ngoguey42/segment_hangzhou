@@ -71,16 +71,23 @@ This document presents statistics computed on a pack file which results from a T
 
 The goal of this document is to gather insights for future improvements of irmin-pack, notably for the layered store design.
 
-This work is splitted on several pages📄.
+## Contents of this Work
+
+```
+pack file -> OCaml program -> csv files -> notebook generator programs -> notebooks
+```
+
+An OCaml program scans the pack file, gathering data that are saved to csv files that can be found in the `csv` directory in the same repository.
+
+For the occasion, was written a pack file tree traversal algorithm ([traverse.ml](./traverse.ml)) that reads the disk pages only once while traversing from high offsets to low offsets. This algorithm can be used to fold over the entries and also to fold over the chunks of consecutive entries (for optimised copies).
+
+The csv results are analysed throughout ipython notebooks (like this one) which are generated using the `gen_*.py` scripts in the same repository.
+
+The results are splitted on several pages 📄.
 
 The light bulbs 💡 accompanying the data are insights on what can be seen.
 
-The raw data used for this document can be found at `csv/*csv` in the same repository.
-
-These `.ipynb` files are generated with the `gen_*.py` scripts in the same repository.
-
-
-### What's the _Tree of a Commit_
+## Definition: _Tree of a Commit_
 
 In Irmin, a commit points to a root directory (i.e. the "/" path), which itself references files and/or sub-directories. Directories are called _nodes_ and files are called _contents_ or _blobs_. Both are _objects_ in Irmin. The root node and all the objects reachable from it constitute the _tree of a commit_.
 
@@ -100,16 +107,16 @@ Regardless of the indexing strategy, in Tezos, the tree of a commit shares more 
 Regardless of the indexing strategy, in Tezos, many contents and nodes appear several time in the tree. This is happening because Tezos tend to copy nodes and contents around, instead of re-creating them from scratch.
 
 
-### Contents of the Pack File
+## Contents of the Pack File
 
-This bootstrap was realised using Irmin 3.0 and its new structured keys, using the _minimal_ indexing strategy, which results in a bit less sharing in the pack file.
+This bootstraping was realised using Irmin 3.0 and its new structured keys using the _minimal_ indexing strategy, which results in a bit less sharing in the pack file.
 
 Ignoring the genesis commit which is present in all Tezos pack files, the first commit of the pack file belongs to block 1,916,930 (2nd of Hangzhou, 2nd of cycle 428, 4 Dec 2021, https://tzstats.com/1916930). This commit was created by a Tezos snapshot import.
 
 The last commit analysed belongs to block 2,056,194 (2nd of cycle 445, 23 Jan 2022, https://tzstats.com/2056194). This commit is analysed in depth in the __The Tree of Commit 445__ section.
 
 
-##### Summary
+#### Summary
 ```
 Number of objects: {int(d0.loc['count']):,d} (a.k.a. pack file entries). Breakdown:
 - {float(d0.loc['blob_count'] / max(1, d0.loc['count'])):4.0%} {int(d0.loc['blob_count']):>11,d} contents (a.k.a. blobs);
@@ -128,13 +135,16 @@ Second breakdown:
 - {float(d0.loc['other_bytes'] / max(1, d0.loc['bytes'])):4.0%} {int(d0.loc['other_bytes']):>14,d}B elsewhere.
 ```
 
+💡 The hidden nodes are responsible for 70% of the size of the pack file.
+
 💡 `139,431` commits are accounted above, but when looking at the block levels we would expect `139,265` (`2,056,194 - 1,916,930 + 1`). This difference is due to orphan blocks.
 
-### Pack File Areas
+## Pack File Areas
 
 This document focuses on 18 commits, which are the 2nd of the Tezos cycles 428 to 445. "Commit 428" is the first commit of the pack file (ignoring the genesis commit) and "commit 445" is the last commit analysed in this document.
 
-This document considers 19 areas delimited by the 18 commits:
+This document considers 19 areas delimited by the 18 commits. An area X contains the data that was pushed to the pack file during the cycle X.
+
 """)
 
 l = []
@@ -156,19 +166,17 @@ markdown(f"""\
 
 💡 The first area starts at the beginning of the pack file and ends right before commit 428.
 
-💡 The second area's first object is commit 428. It ends right before commit 429.
+💡 The second area's first object is commit 428. This area ends right before commit 429.
 
 💡 The first area contains the genesis commit. The last area only contains commit 445. All other areas have at least 8192 commits, which is the number of block level in a cycle, the other commits being orphan ones.
 
 💡 The first area is solely made of objects from the snapshot import.
 
-💡 Aside for 7 objects that belong to the genesis commit, the objects of the first area are the objects of the tree of commit 428.
-
-💡 Commit 429 is preceded by ~8200 commits, which makes it a typical _freeze commit_ for the layered store
+💡 Aside for ~7 objects that belong to the genesis commit, the objects of the first area are the objects of the tree of commit 428.
 
 
-##### Areas Evolution
-The areas get bigger over time. This is directly because the Tezos blockchain is growing. A cycle tend to host more transactions than the previous one.
+#### Areas Evolution
+It can be seen in the above table that the areas get bigger over time. This is because the Tezos blockchain is growing. Recent cycles tend to host more transactions than the older ones.
 """)
 
 code(f"""custom_plot_tools.plot_area_curve_object_count('/tmp/summary_df1.csv', 'area', "Evolution of Areas' Object Count", xbounds=(428, 444))""")
@@ -181,6 +189,8 @@ code(f"""custom_plot_tools.plot_area_curve_byte_count('/tmp/summary_df1.csv', 'a
 
 markdown(f"""\
 💡 Each area weigh around 3GB, which corresponds the growth of the pack file at every cycle (every 3 days).
+
+💡 Every cycle the pack file write rate increases by ~1% (35MB over 3000MB).
 
 💡 Cycle 428 grew the pack file by ~2.9GB and cycle 443 by ~3.5GB. Most of this acceleration is due to the hidden nodes.
 """)
@@ -226,22 +236,24 @@ df1.to_csv(f'/tmp/all_trees_df1.csv', index=False)
 
 # ******************************************************************************
 markdown(f"""\
-### Tree of Commits
+## Tree of Commits
+
+The previous section focused on the everything that was pushed to the pack file during cycles. This new section focuses on how the trees evolve. The pack file getting big is a short term problem for rolling Tezos nodes, but the commit tree getting big is a long term problem. Fortunately, the commit tree grows much slower than the pack file.
 """)
 
 code(f"""custom_plot_tools.plot_area_curve_object_count('/tmp/all_trees_df1.csv', 'parent_cycle_start', "Evolution of Commit Trees' Object Count")""")
 
 markdown(f"""\
-💡 While the rate at which the pack file areas grow is unstable, the rate at which the commit trees grow is extremely stable.
+💡 While the rate at which the pack file areas grows is unstable, the rate at which the commit trees grows is very stable.
 
-💡 The commit tree gains 141k blobs per cycle, while half a million are in each area (see previous section). This highlights the fact that very few blobs pushed to the pack file stay around.
+💡 The previous section shows that ~6 million hidden nodes are pushed per cycle. The above plot shows that the commit tree gains 37K hidden nodes every cycle. This means that ~0.5% of the hidden nodes stick around in the tree durably.
+
+💡 The previous section shows that ~3 million blobs are pushed per cycle. The above plot shows that the commit tree gains 141K blobs every cycle. This means that ~5% of the blobs stick around in the tree durably.
 """)
 
 code(f"""custom_plot_tools.plot_area_curve_byte_count('/tmp/all_trees_df1.csv', 'parent_cycle_start', "Evolution of Commit Trees' Disk Footprint")""")
 markdown(f"""\
-💡 The commit tree grows 39MB per cycle while the pack file grows 3GB per cycle. This average growth doesn't reflect the fact that a cycle replaces objects from previous cycles. The data in __The Tree of Commit 445__ shows that commit 445 references 267MB of data from cycle 444 and 154MB from cycle 443.
-
-💡 The commit tree growing of 39MB per cycle doesn't imply that only 3
+💡 The commit tree grows 39MB per cycle while the pack file grows 3GB per cycle. These numbers don't reflect the fact that a cycle replaces objects from previous cycles. The data in __The Tree of Commit 445__ shows that commit 445 references 267MB of data from cycle 444 and 154MB from cycle 443.
 """)
 
 # ******************************************************************************
@@ -249,7 +261,7 @@ markdown(f"""\
 # ******************************************************************************
 
 markdown(f"""\
-### Areas and Trees Cross-Analysis
+## Areas and Trees Cross-Analysis
 
 [📄areas_and_trees.ipynb](./areas_and_trees.ipynb) details where the data of each tree is located in the pack file.
 """)
@@ -257,7 +269,7 @@ markdown(f"""\
 
 markdown(f"""\
 
-### The Tree of Commit 445
+## The Tree of Commit 445
 
 The stats in this section focus on the tree at the beginning of cycle 445. Many more objects were added during cycle 444 and all the previous cycles, but only a fraction is still referenced by the tree at the beginning of cycle 445.
 
@@ -272,6 +284,15 @@ These notebooks zoom on the heaviest paths of the tree:
 - `/data/big_maps/index/*/contents/*/data` are contents that take up a lot of space [📄url](./tree_of_cycle_445_big_maps-index-star-contents-star-data.ipynb).
 
 """)
+
+
+markdown(f"""\
+## Conclusion
+
+
+""")
+
+
 
 nb['cells'] = cells
 with open('index.ipynb', 'w') as f:

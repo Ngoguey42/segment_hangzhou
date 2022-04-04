@@ -105,7 +105,7 @@ import custom_plot_tools""")
 
 # ********************************************************************
 markdown(f"""\
-### Objects used by each commit in each area
+### Objects Used by Each Commit in Each Area
 
 The first line informs on the number of objects in each area. The following lines inform on the percentage of these objects that is used by the commits.
 """)
@@ -114,16 +114,18 @@ custom_plot_tools.plot_areas_and_trees('/tmp/areas.csv', '/tmp/trees_in_areas.cs
 markdown(f"""\
 💡 All the numbers in the first column are greater or equal to 85%. This indicates that most of the objects of the snapshot stay referenced by new commits for a long time.
 
-💡 All the number in the other columns are below 10%. This indicates that most of the new objects are short-lived garbage for a user that doesn't care about history.
+💡 All the number in the other columns are below 10%. This indicates that most of the new objects are short-lived garbage for rolling Tezos nodes.
 
 💡 Commit 428 (the first commit) always uses everything in area 427 (the snapshot import area).
 
-💡 Commit 429 (which resembles to a typical freeze commit) uses 95% of the objects of area 427 and 8% of area 428.
+💡 Commit 429 (which resembles to a typical freeze commit) uses 95% of the objects of area 427 (which could be though as a "sparse pack file" in the layered store destign) and 8% of area 428.
 """)
 
 # ********************************************************************
 markdown(f"""\
-### Inodes used by each commit in each area
+### Hidden Nodes Used by Each Commit in Each Area
+
+The first line informs on the number of hidden nodes in each area. The following lines inform on the percentage of these hidden nodes that is used by the commits.
 """)
 code(f"""\
 custom_plot_tools.plot_areas_and_trees('/tmp/areas.csv', '/tmp/trees_in_areas.csv', 'inner_count')""")
@@ -133,7 +135,9 @@ markdown(f"""\
 
 # ********************************************************************
 markdown(f"""\
-### Bytes used by each commit in each area
+### Bytes Used by Each Commit in Each Area
+
+The first line informs on the number of bytes in each area. The following lines inform on the percentage of these bytes that is used by the commits.
 """)
 code(f"""\
 custom_plot_tools.plot_areas_and_trees('/tmp/areas.csv', '/tmp/trees_in_areas.csv', 'bytes')""")
@@ -143,7 +147,9 @@ markdown(f"""\
 
 # ********************************************************************
 markdown(f"""\
-### Pages used by each commit in each area
+### Pages Used by Each Commit in Each Area
+
+The first line informs on the number of pages in each area. The following lines inform on the percentage of these pages that is used by the commits.
 """)
 code(f"""\
 custom_plot_tools.plot_areas_and_trees('/tmp/areas.csv', '/tmp/trees_in_areas.csv', 'pages')""")
@@ -156,11 +162,13 @@ markdown(f"""\
 # d = df2.pivot('parent_cycle_start', 'area', 'chunk_count')
 bytes = df2.pivot('parent_cycle_start', 'area', 'bytes')
 chunks = df2.pivot('parent_cycle_start', 'area', 'chunk_count')
+objects = df2.pivot('parent_cycle_start', 'area', 'count')
 bytes.index.name = 'commit'
 chunks.index.name = 'commit'
+objects.index.name = 'commit'
 
 chunks_1d = chunks.sum(axis=1).astype(int).apply(lambda x: x if x < 1000 else f'{x / 1e6:.1f}M')
-bpc_2d = (bytes / chunks).applymap(lambda x: "" if not np.isfinite(x) else f'{x:.0f}' if x < 1e6 else f'{x / 1000000:.0f}M')
+opc_2d = (objects / chunks).applymap(lambda x: "" if not np.isfinite(x) else f'{x:.1f}' if x < 1e6 else f'{x / 1000000:.1f}M')
 chunks_2d = chunks.fillna(0).astype(int).applymap(lambda x: x if x < 1000 else f'{x / 1000:.0f}k')
 
 markdown(f"""\
@@ -178,7 +186,7 @@ The following table shows the number of chunks for each commit.
 
 💡 This list can be seen as the number of offset intervals that a "sparse pack file" would be made of. It grows freeze after freeze, as the fragmentation of offset increases.
 
-💡 Commit 428 might be split in two because of the genesis commit.
+💡 Commit 428 is split in 2, maybe because of the genesis commit.
 
 <br/>
 
@@ -192,11 +200,13 @@ The following table indicates the number of chunks that each commit tree span on
 
 <br/>
 
-That last table shows the average length in bytes of each of these chunks.
+That table shows the average number of objects per chunk.
 
 ```
-{bpc_2d}
+{opc_2d}
 ```
+
+💡 Fragmentation is really high, but this might not be an important perf issue.
 
 """)
 
