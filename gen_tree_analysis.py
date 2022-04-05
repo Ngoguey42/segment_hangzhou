@@ -89,7 +89,7 @@ def on_averaged_tree(df, fname, block_desc, block_subdesc, path_zoom=None):
             """,
             # contracts
             '/data/contracts/index': f"""
-            💡 The steps here are hashes. The fact that they are all "direct" is OK. The dict is made for storings strings that occur often.
+            💡 The steps here are hashes, they all have length 35. The fact that they are all "direct" is OK. The dict is made for storings strings that occur often.
             """,
             '/data/contracts/index/*': f"""
             💡 There are only 13 unique steps that can be found here (e.g. "manager", "delegate"), the fact that 99%

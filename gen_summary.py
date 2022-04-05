@@ -1,3 +1,10 @@
+"""
+To regenerate:
+
+python gen_summary.py && python gen_tree_analysis.py && python gen_areas_and_trees.py && ls -1 *ipynb | xargs -L1 -P8 jupyter nbconvert --to notebook --inplace --execute
+
+"""
+
 import pandas as pd
 import nbformat as nbf
 
@@ -253,6 +260,8 @@ markdown(f"""\
 
 code(f"""custom_plot_tools.plot_area_curve_byte_count('/tmp/all_trees_df1.csv', 'parent_cycle_start', "Evolution of Commit Trees' Disk Footprint")""")
 markdown(f"""\
+💡 The commit tree weighs ~2.5GB at the end of Jan 2022. The commit tree growth rate is 39MB per cycle, which extrapolates to 5GB per year.
+
 💡 The commit tree grows 39MB per cycle while the pack file grows 3GB per cycle. These numbers don't reflect the fact that a cycle replaces objects from previous cycles. The data in __The Tree of Commit 445__ shows that commit 445 references 267MB of data from cycle 444 and 154MB from cycle 443.
 """)
 
@@ -289,6 +298,14 @@ These notebooks zoom on the heaviest paths of the tree:
 markdown(f"""\
 ## Conclusion
 
+There is room for improvements with the on-disk encoding of irmin-pack and the layered store garbage collection will solve the pack file growth. However, the extrapolated commit tree growth is massive: x3 over a year. At best we can lower the on-disk size by constant factors. The layered store is helpless regarding growths in the size of the tree. Tripling the size of the tree implies tripling the size of the "sparse pack file" of the layered store. This might also mean tripling the length of the freezes.
+
+Nothing suggests that Irmin trees, irmin-pack and the layered store will not support that projected load, but we need to think about the implications of this and proactively ensure that things will be OK.
+
+It is unexpected to see that so much bytes are occupied by "direct" steps (40% in the commit tree). The way the dict behaves is obviously sub-optimal (i.e. when full it stops ingesting new data). 3 ideas for improvements:
+- Manually push the ~150 recurring steps (i.e. the english words like "delegated") to the dict and see if it has a positive impact. This might improve the situation for `/data/contracts/index/*`.
+- Introduce a "step_key", analoguous to the structured keys, which would allow to have steps not just being "indirect" and "direct" but also offsets that point to "direct" steps earlier in the pack file.
+- Some steps are known to be human-readable ascii integers (i.e. 35 bytes in `/data/contracts/index` and 65 bytes in `/data/big_maps/index/*/contents`). Tezos could migrate the tree to use a binary form for these steps, or a feature could be added to Irmin that would allow that optimisation at serialisation time.
 
 """)
 

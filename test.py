@@ -1,26 +1,3 @@
-# * PRESENTATION ***************************************************************
-# * AVERAGE TREE  **************************************************************
-# * LARGE DIRECTORIES IN AVERAGE TREE  *****************************************
-# * OVER ALL TREES *************************************************************
-#
-# * TRAVERSAL  *****************************************************************
-#
-# - Over all trees, left to commit, %entries %bytes %pages touched
-#  - A simplified version of the following one
-#
-# - three 2d grids, y=pack file area, x=which tree
-#   - cells:
-#     1. txt:how many entries, txt+shape:% of area entries
-#     1. txt:how many bytes, txt+shape:% of area bytes
-#     1. txt:how many pages, txt+shape:% of area pages
-#
-# * MISSING  *******************************************************************
-#
-# ? Chunks
-# - What's in cycle 444 area, compared to cycle 445 tree
-# - Chunk and pages of tree 445
-# - A section on tree 427
-#
 
 
 import pandas as pd
